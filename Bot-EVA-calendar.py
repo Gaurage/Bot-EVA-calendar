@@ -13,10 +13,11 @@ class KeepAlive(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot EVA is running")
     def log_message(self, format, *args):
-        pass  # silence les logs HTTP
+        pass
 
 def run_server():
-    server = HTTPServer(("0.0.0.0", 8080), KeepAlive)
+    port = int(os.getenv("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), KeepAlive)
     server.serve_forever()
 
 Thread(target=run_server, daemon=True).start()
