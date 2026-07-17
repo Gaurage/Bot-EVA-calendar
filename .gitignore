@@ -1,0 +1,8 @@
+config.txt
+events.json
+pseudos.json
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
