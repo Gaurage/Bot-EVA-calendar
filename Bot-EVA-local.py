@@ -28,7 +28,11 @@ NB_SESSIONS_MAX = 4                     # sessions enchaînées au maximum dans 
 MAX_PAR_JOUR = 50                       # sessions créées par jour (anti-spam)
 MAX_PAR_MOIS = 1500                     # sessions créées par mois (reste dans le gratuit Google)
 PLACES_DEFAUT = 8                       # places par défaut dans /orga (modifiable à chaque fois)
-DESCRIPTIONS_DEFAUT = ["Mix Chill", "Train", "Split"]
+DESCRIPTIONS_DEFAUT = ["Mix Chill", "Train", "Split"]   # exemples affichés sous le champ Description
+
+def description_defaut(guild_id):
+    """Description pré-remplie dans /orga (réglée dans /config)."""
+    return ((config_de(guild_id) or {}).get("descriptions") or DESCRIPTIONS_DEFAUT)[0]
 CREDIT = "-# *🤖 Bot développé par **Gaurage**, joueur de Lyon*"
 CREDIT_COURT = "🤖 Bot développé par Gaurage, joueur de Lyon"
 GARDER = object()  # « ne change pas ce réglage »
@@ -645,7 +649,6 @@ class SessionModal(discord.ui.Modal):
         super().__init__(title="Modifier la session" if ev else "Nouvelle session EVA", timeout=900)
         self.mid = mid
         debut = datetime.fromtimestamp(ev["start_ts"], PARIS) if ev else None
-        presets = (config_de(guild_id) or {}).get("descriptions") or DESCRIPTIONS_DEFAUT
         nb = ev.get("nb_sessions", 1) if ev else None
         places = ev.get("places", PLACES_DEFAUT) if ev else PLACES_DEFAUT
 
@@ -655,8 +658,8 @@ class SessionModal(discord.ui.Modal):
         self.nb = discord.ui.Select(placeholder="Combien de sessions de 40 min ?", options=[
             discord.SelectOption(label=f"{n} session{'s' if n > 1 else ''} ({n * DUREE_SESSION} min)", value=str(n), default=n == nb)
             for n in range(1, NB_SESSIONS_MAX + 1)])
-        self.desc = discord.ui.TextInput(max_length=100, placeholder=", ".join(presets)[:100],
-                                         default=(ev.get("description") if ev else presets[0])[:100])
+        self.desc = discord.ui.TextInput(max_length=100, placeholder=", ".join(DESCRIPTIONS_DEFAUT)[:100],
+                                         default=(ev.get("description") if ev else description_defaut(guild_id))[:100])
         choix = ((PLACES_TEST,) if admin else ()) + PLACES_CHOIX
         if places not in choix:   # ancienne session créée avec un autre nombre
             places = PLACES_DEFAUT
@@ -668,7 +671,7 @@ class SessionModal(discord.ui.Modal):
             ("📅 Date", None, self.date),
             ("🕙 Heure de début", None, self.heure),
             ("🎮 Sessions", None, self.nb),
-            ("📝 Description", "ex : " + ", ".join(presets)[:80] + "… ou ton texte", self.desc),
+            ("📝 Description", "ex : " + ", ".join(DESCRIPTIONS_DEFAUT)[:80] + "… ou ton texte", self.desc),
             ("👥 Places", f"{PLACES_DEFAUT} par défaut", self.places),
         ):
             self.add_item(discord.ui.Label(text=texte, description=aide, component=champ))
@@ -1003,7 +1006,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
         await interaction.response.send_message("❌ Session non créée : " + " ; ".join(erreurs) + ".", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
 
-    desc = description.strip()[:100] or DESCRIPTIONS_DEFAUT[0]
+    desc = description.strip()[:100] or description_defaut(interaction.guild_id)
     ev = {
         "titre": f"{desc} · {debut.strftime('%H:%M')}",
         "organisateur_id": str(interaction.user.id),
@@ -1079,15 +1082,15 @@ class ConfigModal(discord.ui.Modal, title="Réglages du bot"):
         self.telephone = discord.ui.TextInput(min_length=4, max_length=30, placeholder="04 85 96 05 10", default=cfg.get("telephone"))
         self.lien = discord.ui.TextInput(max_length=1000, placeholder="https://app.eva.gg/…locationId=52…",
                                          default=str(cfg["location_id"]) if cfg.get("location_id") else None)
-        self.descriptions = discord.ui.TextInput(max_length=300, required=False, placeholder=", ".join(DESCRIPTIONS_DEFAUT),
-                                                 default=", ".join(cfg.get("descriptions") or DESCRIPTIONS_DEFAUT))
+        self.descriptions = discord.ui.TextInput(max_length=50, required=False, placeholder=DESCRIPTIONS_DEFAUT[0],
+                                                 default=(cfg.get("descriptions") or DESCRIPTIONS_DEFAUT)[0])
         self.role = discord.ui.RoleSelect(required=False, min_values=0, max_values=1, placeholder="Aucun rôle (pas de notification)",
                                           default_values=[discord.Object(cfg["role_id"])] if cfg.get("role_id") else [])
         for texte, aide, champ in (
             ("🏟️ Nom de la salle", CREDIT_COURT, self.nom),
             ("📞 Téléphone de la salle", "Affiché dans le rappel 1h avant (en cas de retard)", self.telephone),
             ("🎟️ Lien de réservation", "Colle l'adresse de la page de réservation de ta salle (ou juste son numéro, ex : 52)", self.lien),
-            ("📝 Descriptions proposées", "Séparées par des virgules (la 1re est pré-remplie dans /orga)", self.descriptions),
+            ("📝 Description par défaut", "Pré-remplie dans /orga (modifiable à chaque session)", self.descriptions),
             ("📣 Rôle à notifier (facultatif)", "Ex : @Abonnés. Ce rôle est notifié dans le fil à chaque nouvelle session", self.role),
         ):
             self.add_item(discord.ui.Label(text=texte, description=aide, component=champ))
@@ -1140,7 +1143,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
     cle = f"_config_{interaction.guild_id}"
     ancien = team_events.get(cle, {})
     if descriptions:
-        liste = [d.strip()[:50] for d in descriptions.split(",") if d.strip()][:10]
+        liste = [descriptions.strip()[:50]]
     else:
         liste = ancien.get("descriptions", DESCRIPTIONS_DEFAUT)
     cfg = {
@@ -1159,7 +1162,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
         f"• Salle : **{cfg['nom']}**\n"
         f"• Téléphone : **{cfg['telephone']}**\n"
         f"• Réservation : [calendrier de la salle (identifiant {location_id})](<{test}>)\n"
-        f"• Descriptions proposées : {', '.join(cfg['descriptions'])}\n"
+        f"• Description par défaut : {cfg['descriptions'][0]}\n"
         f"• Rôle notifié à chaque nouvelle session : {role_txt}\n"
         "\n"
         "Clique sur le lien pour vérifier qu'il ouvre bien ta salle. "
