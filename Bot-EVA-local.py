@@ -847,7 +847,7 @@ class GererView(discord.ui.LayoutView):
 # ── Annuler une session (organisateur ou admin) ─────────────────────────────
 class ConfirmerAnnulation(discord.ui.LayoutView):
     def __init__(self, mid):
-        super().__init__(timeout=60)
+        super().__init__(timeout=600)
         self.mid = mid
         self.add_item(discord.ui.TextDisplay(
             "Annuler cette session ? L'annonce et le fil seront supprimés et les joueurs prévenus en MP."))
@@ -918,6 +918,7 @@ class TeamView(discord.ui.View):
                         await interaction.response.send_message(
                             f"👥 Tu viens avec des amis ? Ils prennent une place chacun ({maximum} max).",
                             view=InvitesView(mid, actuel, maximum), ephemeral=True)
+                        effacer_plus_tard(interaction, 300)   # menu expiré : on l'efface
                 else:
                     # Déjà à sa place : on ne touche à rien
                     await interaction.response.defer()
@@ -965,6 +966,7 @@ class TeamView(discord.ui.View):
             await interaction.response.send_message("⛔ Seul l'organisateur (ou un admin) peut gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         else:
             await interaction.response.send_message(view=GererView(mid), ephemeral=True)
+            effacer_plus_tard(interaction, 600)   # menu expiré : on l'efface
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Commande /orga
