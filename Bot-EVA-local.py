@@ -587,6 +587,13 @@ class InvitesView(discord.ui.View):
         await maj_annonce(ev, self.mid, interaction.channel)
         await prevenir_complet(ev, lien_vers_annonce(ev, self.mid, interaction), promus)
 
+def avec_organisateur(ev, joueurs, auteur_id):
+    """Ajoute l'organisateur aux destinataires si quelqu'un d'autre (un admin) agit sur sa session."""
+    orga = ev.get("organisateur_id")
+    if orga and orga != str(auteur_id) and all(p["id"] != orga for p in joueurs):
+        return joueurs + [{"id": orga}]
+    return joueurs
+
 def peut_gerer(interaction, ev):
     """L'organisateur de la session ou un admin du serveur."""
     return str(interaction.user.id) == ev.get("organisateur_id") or interaction.permissions.manage_guild
@@ -754,7 +761,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
 
     # Photo de la situation AVANT le premier « await » : pendant l'envoi des MP, d'autres joueurs
     # peuvent cliquer (Sortir, Présent…) et changer les listes.
-    destinataires = list(ev["presents"] + ev["attente"])
+    destinataires = avec_organisateur(ev, list(ev["presents"] + ev["attente"]), interaction.user.id)
     positions = {x["id"]: i for i, x in enumerate(ev["attente"], 1)}
     save_team_events()   # avant de répondre : la modification est gardée même si Discord échoue
     await interaction.response.edit_message(view=vue_texte("✅ Session modifiée : les joueurs sont prévenus en MP."))
@@ -864,7 +871,7 @@ class ConfirmerAnnulation(discord.ui.LayoutView):
         )
         for canal, message in ev.get("mps", []):
             await supprimer_mp(canal, message)
-        for p in ev.get("presents", []) + ev.get("attente", []):
+        for p in avec_organisateur(ev, ev.get("presents", []) + ev.get("attente", []), interaction.user.id):
             if p["id"] != str(interaction.user.id):
                 memoriser_temp(await envoyer_mp(p["id"], embed))
         if ev.get("thread_id"):
