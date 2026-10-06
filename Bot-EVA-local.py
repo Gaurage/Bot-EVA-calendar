@@ -599,8 +599,9 @@ def avec_organisateur(ev, joueurs, auteur_id):
     return joueurs
 
 def peut_gerer(interaction, ev):
-    """L'organisateur de la session ou un admin du serveur."""
-    return str(interaction.user.id) == ev.get("organisateur_id") or interaction.permissions.manage_guild
+    """L'organisateur de la session, un modo (« Gérer les messages ») ou un admin du serveur."""
+    p = interaction.permissions
+    return str(interaction.user.id) == ev.get("organisateur_id") or p.manage_guild or p.manage_messages
 
 def memoriser_temp(msg):
     """MP sans session (annulation…) : effacé 24h après l'envoi, comme les réponses drôles."""
@@ -628,7 +629,7 @@ def liens_session(ev, lien_annonce):
     return [l for l in (ligne_reservation(ev), ligne_agenda(ev),
                         f"**[💬 Voir l'organisation sur Discord]({lien_annonce})**" if lien_annonce else "") if l]
 
-# ── Modifier une session (organisateur ou admin) ────────────────────────────
+# ── Modifier une session (organisateur, modo ou admin) ────────────────────────────
 def options_dates(jour_session=None):
     """Les 25 prochains jours (+ le jour actuel de la session s'il est hors liste)."""
     aujourd_hui = datetime.now(PARIS).date()
@@ -803,7 +804,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     save_team_events()
     await prevenir_complet(ev, lien)
 
-# ── Menu ⚙️ Gérer (visible seulement par l'organisateur / un admin) ─────────
+# ── Menu ⚙️ Gérer (organisateur, modos et admins) ─────────
 # Le menu ⚙️ utilise la mise en page « Components V2 » de Discord : elle permet du texte SOUS
 # les boutons (la signature). Un message en V2 ne peut plus afficher de « content » classique :
 # toutes ses mises à jour passent donc par vue_texte().
@@ -844,7 +845,7 @@ class GererView(discord.ui.LayoutView):
         if await self._session(interaction):
             await interaction.response.edit_message(view=ConfirmerAnnulation(self.mid))
 
-# ── Annuler une session (organisateur ou admin) ─────────────────────────────
+# ── Annuler une session (organisateur, modo ou admin) ─────────────────────────────
 async def prevenir_annulation(mid, ev, auteur=None):
     """Session déjà retirée de team_events : MP aux joueurs, suppression du fil et de l'annonce.
     auteur=None : l'annonce a été supprimée à la main sur Discord."""
@@ -982,7 +983,7 @@ class TeamView(discord.ui.View):
         if not ev:
             await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         elif not peut_gerer(interaction, ev):
-            await interaction.response.send_message("⛔ Seul l'organisateur (ou un admin) peut gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
+            await interaction.response.send_message("⛔ Seuls l'organisateur, les modos et les admins peuvent gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         else:
             await interaction.response.send_message(view=GererView(mid), ephemeral=True)
             effacer_plus_tard(interaction, 600)   # menu expiré : on l'efface
