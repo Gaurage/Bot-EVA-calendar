@@ -21,12 +21,11 @@ from zoneinfo import ZoneInfo
 # ═══════════════════════════════════════════════════════════════════════════
 PARIS = ZoneInfo("Europe/Paris")
 DUREE_SESSION = 40                      # une session EVA dure toujours 40 min
-PLACES_MAX = 10                         # capacité max de l'arène
+PLACES_CHOIX = (8, 10)                  # joueurs par partie EVA : 8 ou 10
 NB_SESSIONS_MAX = 4                     # sessions enchaînées au maximum dans une annonce
 MAX_PAR_JOUR = 50                       # sessions créées par jour (anti-spam)
 MAX_PAR_MOIS = 1500                     # sessions créées par mois (reste dans le gratuit Google)
 PLACES_DEFAUT = 8                       # places par défaut dans /orga (modifiable à chaque fois)
-MAX_INVITES = 3                         # amis qu'un joueur peut inscrire en plus de lui
 DESCRIPTIONS_DEFAUT = ["Mix Chill", "Train", "Split"]
 CREDIT = "-# *🤖 Bot développé par **Gaurage**, joueur de Lyon*"
 CREDIT_COURT = "🤖 Bot développé par Gaurage, joueur de Lyon"
@@ -509,6 +508,10 @@ def remplir_places(ev):
         promus.append(p)
     return promus
 
+def max_invites(ev):
+    """Amis qu'un joueur peut ajouter : places - 2 (lui + ses amis laissent au moins 1 place)."""
+    return max(0, ev.get("places", PLACES_DEFAUT) - 2)
+
 def invites_de(ev, user_id):
     return [p for p in ev["presents"] + ev["attente"] if p.get("invite_par") == user_id]
 
@@ -537,13 +540,13 @@ def regler_invites(ev, user, nombre):
 
 class InvitesView(discord.ui.View):
     """Menu privé (re-clic sur ✅ Présent) : inscrire des amis en plus de soi."""
-    def __init__(self, mid, actuel):
+    def __init__(self, mid, actuel, maximum):
         super().__init__(timeout=300)
         self.mid = mid
         choix = discord.ui.Select(placeholder="Combien d'amis viennent avec toi ?", options=[
             discord.SelectOption(label="Personne, juste moi" if n == 0 else f"+{n} ami{'s' if n > 1 else ''}",
                                  value=str(n), default=n == actuel)
-            for n in range(MAX_INVITES + 1)])
+            for n in range(max(maximum, actuel) + 1)])
         choix.callback = self.choisir
         self.add_item(choix)
 
@@ -553,7 +556,7 @@ class InvitesView(discord.ui.View):
         if not ev or not any(p["id"] == uid for p in ev["presents"] + ev["attente"]):
             await interaction.response.edit_message(content="Tu n'es plus inscrit à cette session.", view=None)
             return
-        nombre = int(interaction.data["values"][0])
+        nombre = min(int(interaction.data["values"][0]), max(max_invites(ev), 0))
         promus = regler_invites(ev, interaction.user, nombre)
         en_attente = sum(1 for p in ev["attente"] if p.get("invite_par") == uid)
         save_team_events()
@@ -627,15 +630,17 @@ class SessionModal(discord.ui.Modal):
             for n in range(1, NB_SESSIONS_MAX + 1)])
         self.desc = discord.ui.TextInput(max_length=100, placeholder=", ".join(presets)[:100],
                                          default=(ev.get("description") if ev else presets[0])[:100])
+        if places not in PLACES_CHOIX:   # ancienne session créée avec un autre nombre
+            places = PLACES_DEFAUT
         self.places = discord.ui.Select(options=[
-            discord.SelectOption(label=f"{n} place{'s' if n > 1 else ''}", value=str(n), default=n == places)
-            for n in range(1, PLACES_MAX + 1)])
+            discord.SelectOption(label=f"{n} joueurs", value=str(n), default=n == places)
+            for n in PLACES_CHOIX])
         for texte, aide, champ in (
             ("📅 Date", None, self.date),
             ("🕙 Heure de début", None, self.heure),
             ("🎮 Sessions", None, self.nb),
             ("📝 Description", "ex : " + ", ".join(presets)[:80] + "… ou ton texte", self.desc),
-            ("👥 Places", f"{PLACES_MAX} max", self.places),
+            ("👥 Places", f"{PLACES_DEFAUT} par défaut", self.places),
         ):
             self.add_item(discord.ui.Label(text=texte, description=aide, component=champ))
 
@@ -677,8 +682,8 @@ def lire_saisie(date, heure, nb, places):
     if not 1 <= n <= NB_SESSIONS_MAX:
         erreurs.append(f"le nombre de sessions doit être entre 1 et {NB_SESSIONS_MAX}")
     pl = int(places) if str(places).strip().isdecimal() else 0
-    if not 1 <= pl <= PLACES_MAX:
-        erreurs.append(f"le nombre de places doit être entre 1 et {PLACES_MAX}")
+    if pl not in PLACES_CHOIX:
+        erreurs.append("le nombre de places doit être " + " ou ".join(map(str, PLACES_CHOIX)))
     return debut, n, pl, erreurs
 
 async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
@@ -868,9 +873,14 @@ class TeamView(discord.ui.View):
                 if action == "presents":
                     # Re-clic sur Présent : menu privé pour ajouter des amis
                     mid = str(interaction.message.id)
-                    await interaction.response.send_message(
-                        "👥 Tu viens avec des amis ? Ils prennent une place chacun.",
-                        view=InvitesView(mid, len(invites_de(ev, user_id))), ephemeral=True)
+                    actuel, maximum = len(invites_de(ev, user_id)), max_invites(ev)
+                    if maximum == 0 and actuel == 0:
+                        await interaction.response.send_message(
+                            f"Pas d'amis en plus sur une session de {places} place{'s' if places > 1 else ''}.", ephemeral=True)
+                    else:
+                        await interaction.response.send_message(
+                            f"👥 Tu viens avec des amis ? Ils prennent une place chacun ({maximum} max).",
+                            view=InvitesView(mid, actuel, maximum), ephemeral=True)
                 else:
                     # Déjà à sa place : on ne touche à rien
                     await interaction.response.defer()
