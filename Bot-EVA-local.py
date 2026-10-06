@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 PARIS = ZoneInfo("Europe/Paris")
 DUREE_SESSION = 40                      # une session EVA dure toujours 40 min
 PLACES_CHOIX = (8, 10)                  # joueurs par partie EVA : 8 ou 10
+PLACES_TEST = 1                         # option « 1 joueur (test) » réservée aux admins du serveur
 NB_SESSIONS_MAX = 4                     # sessions enchaînées au maximum dans une annonce
 MAX_PAR_JOUR = 50                       # sessions créées par jour (anti-spam)
 MAX_PAR_MOIS = 1500                     # sessions créées par mois (reste dans le gratuit Google)
@@ -614,7 +615,7 @@ def options_dates(jour_session=None):
 
 class SessionModal(discord.ui.Modal):
     """Formulaire de /orga (création) et du bouton ⚙️ Gérer → Modifier (pré-rempli)."""
-    def __init__(self, guild_id, mid=None, ev=None):
+    def __init__(self, guild_id, mid=None, ev=None, admin=False):
         super().__init__(title="Modifier la session" if ev else "Nouvelle session EVA", timeout=900)
         self.mid = mid
         debut = datetime.fromtimestamp(ev["start_ts"], PARIS) if ev else None
@@ -630,11 +631,13 @@ class SessionModal(discord.ui.Modal):
             for n in range(1, NB_SESSIONS_MAX + 1)])
         self.desc = discord.ui.TextInput(max_length=100, placeholder=", ".join(presets)[:100],
                                          default=(ev.get("description") if ev else presets[0])[:100])
-        if places not in PLACES_CHOIX:   # ancienne session créée avec un autre nombre
+        choix = ((PLACES_TEST,) if admin else ()) + PLACES_CHOIX
+        if places not in choix:   # ancienne session créée avec un autre nombre
             places = PLACES_DEFAUT
         self.places = discord.ui.Select(options=[
-            discord.SelectOption(label=f"{n} joueurs", value=str(n), default=n == places)
-            for n in PLACES_CHOIX])
+            discord.SelectOption(label=f"{n} joueur (test)" if n == PLACES_TEST else f"{n} joueurs",
+                                 value=str(n), default=n == places)
+            for n in choix])
         for texte, aide, champ in (
             ("📅 Date", None, self.date),
             ("🕙 Heure de début", None, self.heure),
@@ -668,7 +671,7 @@ async def maj_annonce(ev, mid, salon_menu=None):
 def quand(ts):
     return f"<t:{ts}:f>"
 
-def lire_saisie(date, heure, nb, places):
+def lire_saisie(date, heure, nb, places, admin=False):
     """Vérifie les champs du formulaire de session -> (debut, nb_sessions, places, erreurs)."""
     erreurs = []
     debut = None
@@ -682,7 +685,7 @@ def lire_saisie(date, heure, nb, places):
     if not 1 <= n <= NB_SESSIONS_MAX:
         erreurs.append(f"le nombre de sessions doit être entre 1 et {NB_SESSIONS_MAX}")
     pl = int(places) if str(places).strip().isdecimal() else 0
-    if pl not in PLACES_CHOIX:
+    if pl not in PLACES_CHOIX and not (admin and pl == PLACES_TEST):
         erreurs.append("le nombre de places doit être " + " ou ".join(map(str, PLACES_CHOIX)))
     return debut, n, pl, erreurs
 
@@ -691,7 +694,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     if not ev:
         await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True)
         return
-    debut, n, pl, erreurs = lire_saisie(date, heure, nb, places)
+    debut, n, pl, erreurs = lire_saisie(date, heure, nb, places, interaction.permissions.manage_guild)
     desc = desc.strip()[:100] or ev.get("description", DESCRIPTIONS_DEFAUT[0])
     if erreurs:
         await interaction.response.send_message("❌ Rien n'a été modifié : " + " ; ".join(erreurs) + ".", ephemeral=True)
@@ -804,7 +807,7 @@ class GererView(discord.ui.LayoutView):
     async def modifier(self, interaction: discord.Interaction):
         ev = await self._session(interaction)
         if ev:
-            await interaction.response.send_modal(SessionModal(ev.get("guild_id"), self.mid, ev))
+            await interaction.response.send_modal(SessionModal(ev.get("guild_id"), self.mid, ev, interaction.permissions.manage_guild))
 
     async def annuler(self, interaction: discord.Interaction):
         if await self._session(interaction):
@@ -954,7 +957,7 @@ async def verifier_orga(interaction):
 @app_commands.guild_only()   # pas en MP : une annonce a besoin d'un salon de serveur
 async def session_cmd(interaction: discord.Interaction):
     if await verifier_orga(interaction) is not None:
-        await interaction.response.send_modal(SessionModal(interaction.guild_id))
+        await interaction.response.send_modal(SessionModal(interaction.guild_id, admin=interaction.permissions.manage_guild))
 
 async def creer_session(interaction, date, heure, nb, description, places):
     stats = await verifier_orga(interaction)
@@ -963,7 +966,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
     if interaction.guild_id is None:   # ancienne commande encore visible en MP avant la synchro
         await interaction.response.send_message("❌ `/orga` s'utilise dans un salon du serveur.", ephemeral=True)
         return
-    debut, n, pl, erreurs = lire_saisie(date, heure, nb, places)
+    debut, n, pl, erreurs = lire_saisie(date, heure, nb, places, interaction.permissions.manage_guild)
     if erreurs:
         await interaction.response.send_message("❌ Session non créée : " + " ; ".join(erreurs) + ".", ephemeral=True)
         return
