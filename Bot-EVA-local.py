@@ -1,6 +1,7 @@
 import discord
 from discord import app_commands
 from discord.ext import tasks
+import asyncio
 import json
 import os
 import random
@@ -237,6 +238,21 @@ bot = BotEVA(intents=discord.Intents.default(),
              allowed_mentions=discord.AllowedMentions(everyone=False, roles=False))
 tree = app_commands.CommandTree(bot)
 
+DELAI_EPHEMERE = 20   # secondes avant d'effacer les messages « Toi seul(e) peux voir celui-ci »
+_taches = set()
+
+def effacer_plus_tard(interaction, delai=DELAI_EPHEMERE):
+    """Efface la réponse privée du bot après quelques secondes."""
+    async def tache():
+        await asyncio.sleep(delai)
+        try:
+            await interaction.delete_original_response()
+        except discord.HTTPException:
+            pass
+    t = asyncio.create_task(tache())
+    _taches.add(t)
+    t.add_done_callback(_taches.discard)
+
 def joueur_lien(p):
     """Mention cliquable : affiche le pseudo du serveur et ouvre le profil Discord."""
     if p.get("invite_par"):
@@ -281,6 +297,7 @@ class VueMP(discord.ui.View):
             f"🧹 C'est fait : {n} message{'s' if n > 1 else ''} du bot effacé{'s' if n > 1 else ''}.\n"
             "ℹ️ Discord ne permet pas au bot d'effacer **tes** messages : survole-les → ⋯ → Supprimer.",
             ephemeral=True)
+        effacer_plus_tard(interaction)
 
 async def envoyer_mp(user_id, embed, ev=None):
     """Envoie un MP ; si une session est donnée, le retient pour l'effacer à J+1."""
@@ -556,6 +573,7 @@ class InvitesView(discord.ui.View):
         uid = str(interaction.user.id)
         if not ev or not any(p["id"] == uid for p in ev["presents"] + ev["attente"]):
             await interaction.response.edit_message(content="Tu n'es plus inscrit à cette session.", view=None)
+            effacer_plus_tard(interaction)
             return
         nombre = min(int(interaction.data["values"][0]), max(max_invites(ev), 0))
         promus = regler_invites(ev, interaction.user, nombre)
@@ -565,6 +583,7 @@ class InvitesView(discord.ui.View):
         if en_attente:
             texte += f"\n⏳ Session complète : {en_attente} en file d'attente."
         await interaction.response.edit_message(content=texte, view=None)
+        effacer_plus_tard(interaction)
         await maj_annonce(ev, self.mid, interaction.channel)
         await prevenir_complet(ev, lien_vers_annonce(ev, self.mid, interaction), promus)
 
@@ -692,12 +711,12 @@ def lire_saisie(date, heure, nb, places, admin=False):
 async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     ev = team_events.get(mid)
     if not ev:
-        await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True)
+        await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     debut, n, pl, erreurs = lire_saisie(date, heure, nb, places, interaction.permissions.manage_guild)
     desc = desc.strip()[:100] or ev.get("description", DESCRIPTIONS_DEFAUT[0])
     if erreurs:
-        await interaction.response.send_message("❌ Rien n'a été modifié : " + " ; ".join(erreurs) + ".", ephemeral=True)
+        await interaction.response.send_message("❌ Rien n'a été modifié : " + " ; ".join(erreurs) + ".", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
 
     nouveau_ts = int(debut.timestamp())
@@ -712,7 +731,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     if pl != ev.get("places", PLACES_DEFAUT):
         changements.append(("👥 Places", str(ev.get("places", PLACES_DEFAUT)), str(pl)))
     if not changements:
-        await interaction.response.send_message("Aucun changement : la session est identique.", ephemeral=True)
+        await interaction.response.send_message("Aucun changement : la session est identique.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
 
     ev.setdefault("attente", [])
@@ -739,6 +758,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     positions = {x["id"]: i for i, x in enumerate(ev["attente"], 1)}
     save_team_events()   # avant de répondre : la modification est gardée même si Discord échoue
     await interaction.response.edit_message(view=vue_texte("✅ Session modifiée : les joueurs sont prévenus en MP."))
+    effacer_plus_tard(interaction)
     await maj_annonce(ev, mid, interaction.channel)
     lien = lien_vers_annonce(ev, mid, interaction)
     auteur = interaction.user.display_name
@@ -801,6 +821,7 @@ class GererView(discord.ui.LayoutView):
         ev = team_events.get(self.mid)
         if not ev:
             await interaction.response.edit_message(view=vue_texte("Cette session n'existe plus."))
+            effacer_plus_tard(interaction)
             return None
         return ev
 
@@ -828,9 +849,11 @@ class ConfirmerAnnulation(discord.ui.LayoutView):
         ev = team_events.pop(self.mid, None)
         if not ev:
             await interaction.response.edit_message(view=vue_texte("Cette session n'existe plus."))
+            effacer_plus_tard(interaction)
             return
         save_team_events()   # tout de suite : un redémarrage ne ressuscite pas la session
         await interaction.response.edit_message(view=vue_texte("🗑️ Session annulée : les joueurs sont prévenus en MP."))
+        effacer_plus_tard(interaction)
         nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
         embed = discord.Embed(
             title=f"❌ {interaction.user.display_name} a annulé {nom} · {ev.get('description', ev['titre'])}"[:256],
@@ -852,6 +875,7 @@ class ConfirmerAnnulation(discord.ui.LayoutView):
 
     async def garder(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=vue_texte("👍 La session est conservée."))
+        effacer_plus_tard(interaction)
 
 class TeamView(discord.ui.View):
     def __init__(self):
@@ -860,7 +884,7 @@ class TeamView(discord.ui.View):
     async def _repondre(self, interaction, action):
         ev = team_events.get(str(interaction.message.id))
         if not ev:
-            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True)
+            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
         ev.setdefault("attente", [])
         user_id = str(interaction.user.id)
@@ -879,7 +903,7 @@ class TeamView(discord.ui.View):
                     actuel, maximum = len(invites_de(ev, user_id)), max_invites(ev)
                     if maximum == 0 and actuel == 0:
                         await interaction.response.send_message(
-                            f"Pas d'amis en plus sur une session de {places} place{'s' if places > 1 else ''}.", ephemeral=True)
+                            f"Pas d'amis en plus sur une session de {places} place{'s' if places > 1 else ''}.", ephemeral=True, delete_after=DELAI_EPHEMERE)
                     else:
                         await interaction.response.send_message(
                             f"👥 Tu viens avec des amis ? Ils prennent une place chacun ({maximum} max).",
@@ -903,7 +927,8 @@ class TeamView(discord.ui.View):
         save_team_events()   # avant de répondre : l'inscription est gardée même si Discord échoue
         await interaction.response.edit_message(embed=build_team_embed(ev), view=TeamView())
         if info:
-            await interaction.followup.send(info, ephemeral=True)
+            msg = await interaction.followup.send(info, ephemeral=True, wait=True)
+            await msg.delete(delay=DELAI_EPHEMERE)
 
         # MP « place libérée » / « session complète »
         await prevenir_complet(ev, interaction.message.jump_url, promus)
@@ -925,9 +950,9 @@ class TeamView(discord.ui.View):
         mid = str(interaction.message.id)
         ev = team_events.get(mid)
         if not ev:
-            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True)
+            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         elif not peut_gerer(interaction, ev):
-            await interaction.response.send_message("⛔ Seul l'organisateur (ou un admin) peut gérer cette session.", ephemeral=True)
+            await interaction.response.send_message("⛔ Seul l'organisateur (ou un admin) peut gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         else:
             await interaction.response.send_message(view=GererView(mid), ephemeral=True)
 
@@ -939,17 +964,17 @@ async def verifier_orga(interaction):
     cfg = config_de(interaction.guild_id)
     if not cfg:
         await interaction.response.send_message(
-            "⚙️ Le bot n'est pas encore configuré sur ce serveur : un admin doit lancer `/config`.", ephemeral=True)
+            "⚙️ Le bot n'est pas encore configuré sur ce serveur : un admin doit lancer `/config`.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return None
     stats = compteurs()
     if stats["nb_jour"] >= MAX_PAR_JOUR:
         await interaction.response.send_message(
-            f"🚫 Limite atteinte : {MAX_PAR_JOUR} sessions ont déjà été créées aujourd'hui. Réessaie demain !", ephemeral=True)
+            f"🚫 Limite atteinte : {MAX_PAR_JOUR} sessions ont déjà été créées aujourd'hui. Réessaie demain !", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return None
     if stats["nb_mois"] >= MAX_PAR_MOIS:
         await interaction.response.send_message(
             f"🚫 Limite atteinte : {MAX_PAR_MOIS} sessions ont déjà été créées ce mois-ci. "
-            f"Réessaie le mois prochain !", ephemeral=True)
+            f"Réessaie le mois prochain !", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return None
     return stats
 
@@ -964,11 +989,11 @@ async def creer_session(interaction, date, heure, nb, description, places):
     if stats is None:
         return
     if interaction.guild_id is None:   # ancienne commande encore visible en MP avant la synchro
-        await interaction.response.send_message("❌ `/orga` s'utilise dans un salon du serveur.", ephemeral=True)
+        await interaction.response.send_message("❌ `/orga` s'utilise dans un salon du serveur.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     debut, n, pl, erreurs = lire_saisie(date, heure, nb, places, interaction.permissions.manage_guild)
     if erreurs:
-        await interaction.response.send_message("❌ Session non créée : " + " ; ".join(erreurs) + ".", ephemeral=True)
+        await interaction.response.send_message("❌ Session non créée : " + " ; ".join(erreurs) + ".", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
 
     desc = description.strip()[:100] or DESCRIPTIONS_DEFAUT[0]
@@ -1066,7 +1091,7 @@ class ConfigModal(discord.ui.Modal, title="Réglages du bot"):
             # Rôle créé automatiquement pour un bot ou une intégration : il ne contient aucun joueur
             await interaction.response.send_message(
                 f"❌ Le rôle {role.mention} appartient à un bot : il ne notifierait personne. "
-                "Choisis un rôle de joueurs comme @Abonnés (ou laisse vide).", ephemeral=True)
+                "Choisis un rôle de joueurs comme @Abonnés (ou laisse vide).", ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
         role = role.id if role is not None else None
         await enregistrer_config(interaction, self.nom.value, self.telephone.value,
@@ -1079,30 +1104,30 @@ async def config_cmd(interaction: discord.Interaction):
     # Double sécurité : même si un admin rend /config visible à d'autres,
     # seuls ceux qui ont la permission « Gérer le serveur » peuvent l'utiliser.
     if not interaction.permissions.manage_guild:
-        await interaction.response.send_message(REFUS_CONFIG, ephemeral=True)
+        await interaction.response.send_message(REFUS_CONFIG, ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     await interaction.response.send_modal(ConfigModal(interaction.guild_id))
 
 async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptions=None, role_id=GARDER):
     if not interaction.permissions.manage_guild:
-        await interaction.response.send_message(REFUS_CONFIG, ephemeral=True)
+        await interaction.response.send_message(REFUS_CONFIG, ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     nom_salle, telephone = (nom_salle or "").strip()[:50], (telephone or "").strip()[:30]
     if len(nom_salle) < 2 or len(telephone) < 4:
-        await interaction.response.send_message("❌ Le nom de la salle et le téléphone sont obligatoires.", ephemeral=True)
+        await interaction.response.send_message("❌ Le nom de la salle et le téléphone sont obligatoires.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     if role_id is not GARDER and role_id and role_id == interaction.guild_id:
         # Sur Discord, le rôle @everyone a le même identifiant que le serveur
         await interaction.response.send_message(
             "❌ @everyone n'est pas accepté : il notifierait tout le serveur à chaque session. "
-            "Choisis un rôle dédié comme @Abonnés (ou laisse vide).", ephemeral=True)
+            "Choisis un rôle dédié comme @Abonnés (ou laisse vide).", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     location_id = lire_location_id(lien or "")
     if not location_id:
         await interaction.response.send_message(
             "❌ Je ne trouve pas l'identifiant de la salle dans ce lien.\n"
             "Ouvre la page de réservation de ta salle sur **app.eva.gg**, copie l'adresse "
-            "(elle contient `locationId=`) et recommence.", ephemeral=True
+            "(elle contient `locationId=`) et recommence.", ephemeral=True, delete_after=DELAI_EPHEMERE
         )
         return
     cle = f"_config_{interaction.guild_id}"
@@ -1132,7 +1157,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
         "\n"
         "Clique sur le lien pour vérifier qu'il ouvre bien ta salle. "
         "Tu peux relancer `/config` à tout moment pour modifier (le formulaire est pré-rempli).",
-        ephemeral=True
+        ephemeral=True, delete_after=300   # 5 min : le temps de tester le lien
     )
 
 # ═══════════════════════════════════════════════════════════════════════════
