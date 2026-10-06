@@ -473,7 +473,7 @@ def build_team_embed(ev):
             value=liste_champ([f"{i}. {joueur_lien(p)}" for i, p in enumerate(ev["attente"], 1)]),
             inline=False
         )
-    embed.set_footer(text="Clique sur un bouton pour répondre · Des amis avec toi ? Re-clique sur ✅ Présent")
+    embed.set_footer(text="Des amis avec toi ? Re-clique sur ✅ Présent")
     return embed
 
 async def envoyer_dm_complet(user_id, ev, lien_annonce, promu=False):
