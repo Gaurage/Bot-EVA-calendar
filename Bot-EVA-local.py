@@ -26,6 +26,7 @@ NB_SESSIONS_MAX = 4                     # sessions enchaînées au maximum dans 
 MAX_PAR_JOUR = 50                       # sessions créées par jour (anti-spam)
 MAX_PAR_MOIS = 1500                     # sessions créées par mois (reste dans le gratuit Google)
 PLACES_DEFAUT = 8                       # places par défaut dans /orga (modifiable à chaque fois)
+MAX_INVITES = 3                         # amis qu'un joueur peut inscrire en plus de lui
 DESCRIPTIONS_DEFAUT = ["Mix Chill", "Train", "Split"]
 CREDIT = "-# *🤖 Bot développé par **Gaurage**, joueur de Lyon*"
 CREDIT_COURT = "🤖 Bot développé par Gaurage, joueur de Lyon"
@@ -238,6 +239,8 @@ tree = app_commands.CommandTree(bot)
 
 def joueur_lien(p):
     """Mention cliquable : affiche le pseudo du serveur et ouvre le profil Discord."""
+    if p.get("invite_par"):
+        return f"👤 Invité de <@{p['invite_par']}>"
     return f"<@{p['id']}>"
 
 def liste_champ(lignes, vide="_Personne pour l'instant_"):
@@ -281,6 +284,8 @@ class VueMP(discord.ui.View):
 
 async def envoyer_mp(user_id, embed, ev=None):
     """Envoie un MP ; si une session est donnée, le retient pour l'effacer à J+1."""
+    if not str(user_id).isdecimal():   # invité sans compte Discord : pas de MP
+        return None
     try:
         user = bot.get_user(int(user_id)) or await bot.fetch_user(int(user_id))
         msg = await user.send(embed=embed, view=VueMP())
@@ -447,7 +452,7 @@ def build_team_embed(ev):
             value=liste_champ([f"{i}. {joueur_lien(p)}" for i, p in enumerate(ev["attente"], 1)]),
             inline=False
         )
-    embed.set_footer(text="Clique sur un bouton pour répondre")
+    embed.set_footer(text="Clique sur un bouton pour répondre · Des amis avec toi ? Re-clique sur ✅ Présent")
     return embed
 
 async def envoyer_dm_complet(user_id, ev, lien_annonce, promu=False):
@@ -491,8 +496,73 @@ async def envoyer_rappel(user_id, ev, lien_annonce):
 #  Boutons : Présent / Sortir / File d'attente
 # ═══════════════════════════════════════════════════════════════════════════
 def retirer_team(ev, user_id):
+    """Retire le joueur ET ses invités."""
     for cle in ("presents", "attente"):
-        ev[cle] = [p for p in ev.get(cle, []) if p["id"] != user_id]
+        ev[cle] = [p for p in ev.get(cle, []) if p["id"] != user_id and p.get("invite_par") != user_id]
+
+def remplir_places(ev):
+    """Les premiers de la file d'attente prennent les places libres -> liste des promus."""
+    promus = []
+    while ev["attente"] and len(ev["presents"]) < ev.get("places", PLACES_DEFAUT):
+        p = ev["attente"].pop(0)
+        ev["presents"].append(p)
+        promus.append(p)
+    return promus
+
+def invites_de(ev, user_id):
+    return [p for p in ev["presents"] + ev["attente"] if p.get("invite_par") == user_id]
+
+def regler_invites(ev, user, nombre):
+    """Met le nombre d'invités du joueur à `nombre` -> liste des promus de la file d'attente."""
+    uid = str(user.id)
+    actuels = invites_de(ev, uid)
+    if nombre > len(actuels):
+        pris = {p["id"] for p in actuels}
+        k = 1
+        for _ in range(nombre - len(actuels)):
+            while f"{uid}-inv{k}" in pris:
+                k += 1
+            pris.add(f"{uid}-inv{k}")
+            invite = {"id": f"{uid}-inv{k}", "pseudo": f"Invité de {user.display_name}", "invite_par": uid}
+            liste = "presents" if len(ev["presents"]) < ev.get("places", PLACES_DEFAUT) else "attente"
+            ev[liste].append(invite)
+        return []
+    # Moins d'invités : on retire d'abord ceux en file d'attente, puis les derniers inscrits
+    ordre = [p for p in reversed(ev["attente"]) if p.get("invite_par") == uid] + \
+            [p for p in reversed(ev["presents"]) if p.get("invite_par") == uid]
+    ids = {p["id"] for p in ordre[:len(actuels) - nombre]}
+    for cle in ("presents", "attente"):
+        ev[cle] = [p for p in ev[cle] if p["id"] not in ids]
+    return remplir_places(ev)
+
+class InvitesView(discord.ui.View):
+    """Menu privé (re-clic sur ✅ Présent) : inscrire des amis en plus de soi."""
+    def __init__(self, mid, actuel):
+        super().__init__(timeout=300)
+        self.mid = mid
+        choix = discord.ui.Select(placeholder="Combien d'amis viennent avec toi ?", options=[
+            discord.SelectOption(label="Personne, juste moi" if n == 0 else f"+{n} ami{'s' if n > 1 else ''}",
+                                 value=str(n), default=n == actuel)
+            for n in range(MAX_INVITES + 1)])
+        choix.callback = self.choisir
+        self.add_item(choix)
+
+    async def choisir(self, interaction: discord.Interaction):
+        ev = team_events.get(self.mid)
+        uid = str(interaction.user.id)
+        if not ev or not any(p["id"] == uid for p in ev["presents"] + ev["attente"]):
+            await interaction.response.edit_message(content="Tu n'es plus inscrit à cette session.", view=None)
+            return
+        nombre = int(interaction.data["values"][0])
+        promus = regler_invites(ev, interaction.user, nombre)
+        en_attente = sum(1 for p in ev["attente"] if p.get("invite_par") == uid)
+        save_team_events()
+        texte = "✅ Aucun invité." if nombre == 0 else f"✅ {nombre} invité{'s' if nombre > 1 else ''} avec toi."
+        if en_attente:
+            texte += f"\n⏳ Session complète : {en_attente} en file d'attente."
+        await interaction.response.edit_message(content=texte, view=None)
+        await maj_annonce(ev, self.mid, interaction.channel)
+        await prevenir_complet(ev, lien_vers_annonce(ev, self.mid, interaction), promus)
 
 def peut_gerer(interaction, ev):
     """L'organisateur de la session ou un admin du serveur."""
@@ -790,13 +860,20 @@ class TeamView(discord.ui.View):
         places = ev.get("places", PLACES_DEFAUT)
         inscrit = any(p["id"] == user_id for p in ev["presents"])
         en_attente = any(p["id"] == user_id for p in ev["attente"])
-        promu = None
+        promus = []
         info = None
 
         if action in ("presents", "attente"):
             if inscrit or (en_attente and len(ev["presents"]) >= places):
-                # Déjà à sa place : on ne touche à rien
-                await interaction.response.defer()
+                if action == "presents":
+                    # Re-clic sur Présent : menu privé pour ajouter des amis
+                    mid = str(interaction.message.id)
+                    await interaction.response.send_message(
+                        "👥 Tu viens avec des amis ? Ils prennent une place chacun.",
+                        view=InvitesView(mid, len(invites_de(ev, user_id))), ephemeral=True)
+                else:
+                    # Déjà à sa place : on ne touche à rien
+                    await interaction.response.defer()
                 return
             retirer_team(ev, user_id)
             if len(ev["presents"]) < places:
@@ -805,12 +882,10 @@ class TeamView(discord.ui.View):
                 ev["attente"].append(joueur)
                 info = (f"⏳ Session complète : tu es en file d'attente (position {len(ev['attente'])}). "
                         f"Tu recevras un MP si une place se libère.")
-        else:  # Sortir
+        else:  # Sortir (avec ses invités)
             retirer_team(ev, user_id)
-            # Une place se libère : le 1er de la file d'attente la prend
-            if inscrit and ev["attente"] and len(ev["presents"]) < places:
-                promu = ev["attente"].pop(0)
-                ev["presents"].append(promu)
+            # Des places se libèrent : les premiers de la file d'attente les prennent
+            promus = remplir_places(ev)
 
         save_team_events()   # avant de répondre : l'inscription est gardée même si Discord échoue
         await interaction.response.edit_message(embed=build_team_embed(ev), view=TeamView())
@@ -818,7 +893,7 @@ class TeamView(discord.ui.View):
             await interaction.followup.send(info, ephemeral=True)
 
         # MP « place libérée » / « session complète »
-        await prevenir_complet(ev, interaction.message.jump_url, [promu] if promu else [])
+        await prevenir_complet(ev, interaction.message.jump_url, promus)
 
     @discord.ui.button(label="✅ Présent", style=discord.ButtonStyle.success, custom_id="team_present")
     async def present(self, interaction: discord.Interaction, button: discord.ui.Button):
