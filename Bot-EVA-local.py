@@ -845,6 +845,42 @@ class GererView(discord.ui.LayoutView):
             await interaction.response.edit_message(view=ConfirmerAnnulation(self.mid))
 
 # ── Annuler une session (organisateur ou admin) ─────────────────────────────
+async def prevenir_annulation(mid, ev, auteur=None):
+    """Session déjà retirée de team_events : MP aux joueurs, suppression du fil et de l'annonce.
+    auteur=None : l'annonce a été supprimée à la main sur Discord."""
+    nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
+    sujet = f"{nom} · {ev.get('description', ev['titre'])}"
+    embed = discord.Embed(
+        title=(f"❌ {auteur.display_name} a annulé {sujet}" if auteur else f"❌ Session annulée : {sujet}")[:256],
+        description=(f"📅 <t:{ev['start_ts']}:F>\n\n"
+                     "La session n'aura pas lieu. Si tu avais réservé, pense à annuler ta réservation EVA "
+                     "et à retirer la partie de ton agenda."),
+        color=0xE74C3C
+    )
+    auteur_id = str(auteur.id) if auteur else None
+    for canal, message in ev.get("mps", []):
+        await supprimer_mp(canal, message)
+    for p in avec_organisateur(ev, ev.get("presents", []) + ev.get("attente", []), auteur_id):
+        if p["id"] != auteur_id:
+            memoriser_temp(await envoyer_mp(p["id"], embed))
+    if ev.get("thread_id"):
+        await supprimer_salon_ou_message(ev["thread_id"])
+    if auteur and ev.get("channel_id"):
+        await supprimer_salon_ou_message(ev["channel_id"], int(mid))
+    save_team_events()
+
+@bot.event
+async def on_raw_message_delete(payload):
+    """Annonce supprimée à la main (⋯ → Supprimer) : la session est annulée comme avec ⚙️ Gérer.
+    Quand c'est le bot qui supprime (annulation, nettoyage J+1), la session est déjà retirée : rien à faire."""
+    mid = str(payload.message_id)
+    ev = team_events.get(mid)
+    if not isinstance(ev, dict) or "start_ts" not in ev:
+        return
+    team_events.pop(mid, None)
+    save_team_events()
+    print(f"🗑️ Annonce {payload.message_id} supprimée à la main : session annulée")
+    await prevenir_annulation(payload.message_id, ev)
 class ConfirmerAnnulation(discord.ui.LayoutView):
     def __init__(self, mid):
         super().__init__(timeout=600)
@@ -864,24 +900,7 @@ class ConfirmerAnnulation(discord.ui.LayoutView):
         save_team_events()   # tout de suite : un redémarrage ne ressuscite pas la session
         await interaction.response.edit_message(view=vue_texte("🗑️ Session annulée : les joueurs sont prévenus en MP."))
         effacer_plus_tard(interaction)
-        nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
-        embed = discord.Embed(
-            title=f"❌ {interaction.user.display_name} a annulé {nom} · {ev.get('description', ev['titre'])}"[:256],
-            description=(f"📅 <t:{ev['start_ts']}:F>\n\n"
-                         "La session n'aura pas lieu. Si tu avais réservé, pense à annuler ta réservation EVA "
-                         "et à retirer la partie de ton agenda."),
-            color=0xE74C3C
-        )
-        for canal, message in ev.get("mps", []):
-            await supprimer_mp(canal, message)
-        for p in avec_organisateur(ev, ev.get("presents", []) + ev.get("attente", []), interaction.user.id):
-            if p["id"] != str(interaction.user.id):
-                memoriser_temp(await envoyer_mp(p["id"], embed))
-        if ev.get("thread_id"):
-            await supprimer_salon_ou_message(ev["thread_id"])
-        if ev.get("channel_id"):
-            await supprimer_salon_ou_message(ev["channel_id"], int(self.mid))
-        save_team_events()
+        await prevenir_annulation(self.mid, ev, interaction.user)
 
     async def garder(self, interaction: discord.Interaction):
         await interaction.response.edit_message(view=vue_texte("👍 La session est conservée."))
