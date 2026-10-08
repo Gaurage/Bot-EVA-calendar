@@ -1066,6 +1066,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
         info = await interaction.followup.send(f"✅ Annonce publiée dans {cible.mention} : {msg.jump_url}",
                                                ephemeral=True, wait=True)
         await info.delete(delay=60)
+        await supprimer_fil_perso(salon, interaction.user.id)
     ev["channel_id"] = msg.channel.id
     mid = str(msg.id)
     # Enregistrée AVANT de créer le fil : les boutons de l'annonce répondent tout de suite
@@ -1078,6 +1079,19 @@ async def creer_session(interaction, date, heure, nb, description, places):
         await notifier_role(ev, interaction.user)
     elif fil:   # session annulée pendant la création du fil
         await supprimer_salon_ou_message(fil)
+
+async def supprimer_fil_perso(fil, user_id):
+    """Fil créé par l'organisateur juste pour taper /orga : supprimé pour éviter un doublon avec le fil du bot.
+    Seulement s'il l'a créé lui-même et que personne d'autre n'y a écrit."""
+    try:
+        if fil.owner_id != user_id:
+            return
+        async for m in fil.history(limit=50):
+            if m.author.id not in (user_id, bot.user.id):
+                return   # une vraie discussion : on n'y touche pas
+        await fil.delete()
+    except discord.HTTPException as e:
+        print(f"⚠️ Fil perso {fil.id} non supprimé (permission 'Gérer les fils' ?) : {e}")
 
 async def notifier_role(ev, auteur):
     """Ping du rôle choisi dans /config, dans le fil : ses membres sont notifiés et le fil
