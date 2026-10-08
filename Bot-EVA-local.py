@@ -1045,13 +1045,27 @@ async def creer_session(interaction, date, heure, nb, description, places):
     # Compté AVANT le premier « await » : 2 /orga envoyés en même temps ne peuvent pas dépasser la limite
     stats["nb_jour"] += 1
     stats["nb_mois"] += 1
+    # /orga tapé dans un fil : l'annonce part dans le salon principal (sinon pas de fil ni de notification)
+    salon = interaction.channel
+    cible = salon.parent if isinstance(salon, discord.Thread) and isinstance(salon.parent, discord.TextChannel) else None
     try:
-        await interaction.response.send_message(embed=build_team_embed(ev), view=TeamView())
-        msg = await interaction.original_response()
+        if cible:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            msg = await cible.send(embed=build_team_embed(ev), view=TeamView())
+        else:
+            await interaction.response.send_message(embed=build_team_embed(ev), view=TeamView())
+            msg = await interaction.original_response()
     except Exception:
         stats["nb_jour"] -= 1
         stats["nb_mois"] -= 1
+        if cible:
+            await interaction.followup.send(f"❌ Impossible de publier l'annonce dans {cible.mention} "
+                                            "(le bot n'a peut-être pas le droit d'y écrire).", ephemeral=True)
         raise
+    if cible:
+        info = await interaction.followup.send(f"✅ Annonce publiée dans {cible.mention} : {msg.jump_url}",
+                                               ephemeral=True, wait=True)
+        await info.delete(delay=60)
     ev["channel_id"] = msg.channel.id
     mid = str(msg.id)
     # Enregistrée AVANT de créer le fil : les boutons de l'annonce répondent tout de suite
