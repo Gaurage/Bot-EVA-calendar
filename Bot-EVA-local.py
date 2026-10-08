@@ -329,7 +329,7 @@ async def supprimer_mp(channel_id, message_id):
 
 def nom_fil(desc, debut):
     """Nom du fil : date · description · heure (ex : 15/10 · Mix Chill · 17:10)."""
-    return f"{debut.strftime('%d/%m')} · {desc[:80]} · {debut.strftime('%H:%M')}"
+    return f"{debut.strftime('%d/%m')} · {desc[:80]} · {debut.strftime('%Hh%M')}"
 
 async def creer_fil(msg, nom):
     """Crée un fil de discussion sous l'annonce. Renvoie l'id du fil ou None."""
@@ -422,7 +422,7 @@ def lien_google_agenda(ev):
     fin = debut + ev.get("nb_sessions", 1) * ev.get("duree", DUREE_SESSION) * 60
     fmt = lambda ts: datetime.fromtimestamp(ts, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     n = ev.get("nb_sessions", 1)
-    heures = " · ".join(datetime.fromtimestamp(debut + i * ev.get("duree", DUREE_SESSION) * 60, PARIS).strftime("%H:%M")
+    heures = " · ".join(datetime.fromtimestamp(debut + i * ev.get("duree", DUREE_SESSION) * 60, PARIS).strftime("%Hh%M")
                         for i in range(n))
     presents = ev.get("presents", [])
     params = {
@@ -659,7 +659,7 @@ class SessionModal(discord.ui.Modal):
 
         self.date = discord.ui.Select(placeholder="Choisis le jour", options=options_dates(debut.date() if debut else None))
         self.heure = discord.ui.TextInput(placeholder="ex : 22, 22h10, 22:10", max_length=10,
-                                          default=debut.strftime("%H:%M") if debut else None)
+                                          default=debut.strftime("%Hh%M") if debut else None)
         self.nb = discord.ui.Select(placeholder="Combien de sessions de 40 min ?", options=[
             discord.SelectOption(label=f"{n} session{'s' if n > 1 else ''} ({n * DUREE_SESSION} min)", value=str(n), default=n == nb)
             for n in range(1, NB_SESSIONS_MAX + 1)])
@@ -753,7 +753,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     if nouveau_ts != ev["start_ts"]:
         ev["rappel_envoye"] = False
     ev.update(start_ts=nouveau_ts, nb_sessions=n, description=desc, places=pl,
-              titre=f"{desc} · {debut.strftime('%H:%M')}")
+              titre=f"{desc} · {debut.strftime('%Hh%M')}")
     # Places réduites : les derniers inscrits passent en tête de la file d'attente
     retrogrades = ev["presents"][pl:]
     ev["presents"] = ev["presents"][:pl]
@@ -1034,7 +1034,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
 
     desc = description.strip()[:100] or description_defaut(interaction.guild_id)
     ev = {
-        "titre": f"{desc} · {debut.strftime('%H:%M')}",
+        "titre": f"{desc} · {debut.strftime('%Hh%M')}",
         "organisateur_id": str(interaction.user.id),
         "description": desc,
         "start_ts": int(debut.timestamp()),
