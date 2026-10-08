@@ -327,6 +327,10 @@ async def supprimer_mp(channel_id, message_id):
     except discord.HTTPException:
         pass
 
+def nom_fil(desc, debut):
+    """Nom du fil : date · description · heure (ex : 15/10 · Mix Chill · 17:10)."""
+    return f"{debut.strftime('%d/%m')} · {desc[:80]} · {debut.strftime('%H:%M')}"
+
 async def creer_fil(msg, nom):
     """Crée un fil de discussion sous l'annonce. Renvoie l'id du fil ou None."""
     try:
@@ -780,7 +784,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     if ev.get("thread_id"):
         try:
             fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
-            await fil.edit(name=f"{desc[:80]} {debut.strftime('%d/%m/%Y %H:%M')}")
+            await fil.edit(name=nom_fil(desc, debut))
             await fil.send(f"✏️ {interaction.user.mention} a modifié la session :\n\n{resume}")
         except Exception as e:
             print(f"⚠️ Fil non mis à jour : {e}")
@@ -1072,7 +1076,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
     # Enregistrée AVANT de créer le fil : les boutons de l'annonce répondent tout de suite
     team_events[mid] = ev
     save_team_events()
-    fil = await creer_fil(msg, f"{desc[:80]} {debut.strftime('%d/%m/%Y %H:%M')}")
+    fil = await creer_fil(msg, nom_fil(desc, debut))
     if team_events.get(mid) is ev:
         ev["thread_id"] = fil
         save_team_events()
