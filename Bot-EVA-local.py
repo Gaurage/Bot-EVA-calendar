@@ -454,7 +454,7 @@ def build_team_embed(ev):
     # Titre : jour, date, description, heure (la description n'est donc plus répétée dessous)
     debut = datetime.fromtimestamp(ts, PARIS)
     jour = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"][debut.weekday()]
-    titre = f"📅 {jour} {debut:%d/%m} · {ev.get('description', ev['titre'])[:150]} · {debut:%Hh%M}"
+    titre = f"📅 {jour} {debut:%d/%m} · · {ev.get('description', ev['titre'])[:150]} · · {debut:%Hh%M}"
     bloc_desc = ""
     embed = discord.Embed(
         title=titre[:256],
