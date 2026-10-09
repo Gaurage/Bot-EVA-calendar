@@ -259,10 +259,10 @@ def effacer_plus_tard(interaction, delai=DELAI_EPHEMERE):
     t.add_done_callback(_taches.discard)
 
 def joueur_lien(p):
-    """Mention cliquable : affiche le pseudo du serveur et ouvre le profil Discord."""
-    if p.get("invite_par"):
-        return f"👤 Invité de <@{p['invite_par']}>"
-    return f"<@{p['id']}>"
+    """Pseudo en texte (une mention <@id> s'affiche en chiffres sur Discord mobile quand
+    le membre n'est pas chargé dans l'appli)."""
+    nom = discord.utils.escape_markdown(p.get("pseudo") or "?")
+    return f"👤 {nom}" if p.get("invite_par") else nom
 
 def liste_champ(lignes, vide="_Personne pour l'instant_"):
     """Assemble des lignes sans dépasser la limite Discord (1024) ni couper un pseudo."""
@@ -457,7 +457,10 @@ def build_team_embed(ev):
     ts = ev["start_ts"]
     n = ev.get("nb_sessions", 1)
     d = ev.get("duree", DUREE_SESSION)
-    orga = f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?")
+    orga_nom = ev.get("organisateur_nom") or next(
+        (p["pseudo"] for p in ev.get("presents", []) + ev.get("attente", []) if p["id"] == ev.get("organisateur_id")), None)
+    orga = (discord.utils.escape_markdown(orga_nom) if orga_nom
+            else f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?"))
     # Titre : jour, date et heure ; la description juste en dessous, en gros
     debut = datetime.fromtimestamp(ts, PARIS)
     titre = f"📅 {JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {debut:%Hh%M}"
@@ -1063,6 +1066,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
     ev = {
         "titre": f"{desc} · {debut.strftime('%Hh%M')}",
         "organisateur_id": str(interaction.user.id),
+        "organisateur_nom": interaction.user.display_name,
         "description": desc,
         "start_ts": int(debut.timestamp()),
         "nb_sessions": n,
