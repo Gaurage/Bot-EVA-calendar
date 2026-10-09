@@ -327,9 +327,15 @@ async def supprimer_mp(channel_id, message_id):
     except discord.HTTPException:
         pass
 
+JOURS_LONGS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+
+def libelle_session(desc, debut, max_desc=150):
+    """Ex : « Jeudi 15/10 · · Mix Chill · · 17h10 » (titre de l'annonce, nom du fil…)."""
+    return f"{JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {desc[:max_desc]} · · {debut:%Hh%M}"
+
 def nom_fil(desc, debut):
-    """Nom du fil : date · description · heure (ex : 15/10 · Mix Chill · 17:10)."""
-    return f"{debut.strftime('%d/%m')} · {desc[:80]} · {debut.strftime('%Hh%M')}"
+    """Nom du fil (100 caractères max sur Discord)."""
+    return libelle_session(desc, debut, 65)
 
 async def creer_fil(msg, nom):
     """Crée un fil de discussion sous l'annonce. Renvoie l'id du fil ou None."""
@@ -452,9 +458,7 @@ def build_team_embed(ev):
     d = ev.get("duree", DUREE_SESSION)
     orga = f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?")
     # Titre : jour, date, description, heure (la description n'est donc plus répétée dessous)
-    debut = datetime.fromtimestamp(ts, PARIS)
-    jour = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"][debut.weekday()]
-    titre = f"📅 {jour} {debut:%d/%m} · · {ev.get('description', ev['titre'])[:150]} · · {debut:%Hh%M}"
+    titre = "📅 " + libelle_session(ev.get("description", ev["titre"]), datetime.fromtimestamp(ts, PARIS))
     bloc_desc = ""
     embed = discord.Embed(
         title=titre[:256],
