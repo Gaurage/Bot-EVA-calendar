@@ -1174,6 +1174,7 @@ async def notifier_role(ev, auteur):
         await fil.send(f"{debut} organisée par {auteur.mention} : "
                        f"**{ev['description']}**, <t:{ev['start_ts']}:F>\n👇 Inscris-toi ici",
                        view=FilView(),
+                       silent=True,   # @silent : le fil apparaît chez les membres du rôle, sans notification
                        allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
                                                                 roles=[discord.Object(role_id)] if role_id else False))
     except Exception as e:
