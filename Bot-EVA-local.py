@@ -235,6 +235,7 @@ class BotEVA(discord.Client):
     async def setup_hook(self):
         # Avant la connexion : les boutons des anciennes annonces répondent dès le démarrage
         self.add_view(TeamView())
+        self.add_view(FilView())
         self.add_view(VueMP())
         await tree.sync()
 
@@ -918,62 +919,78 @@ class ConfirmerAnnulation(discord.ui.LayoutView):
         await interaction.response.edit_message(view=vue_texte("👍 La session est conservée."))
         effacer_plus_tard(interaction)
 
-class TeamView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+async def repondre_bouton(interaction, mid, action, depuis_fil=False):
+    """Clic sur Présent / Sortir / File d'attente, depuis l'annonce ou depuis le message du fil.
+    action : "presents", "attente" ou None (Sortir)."""
+    ev = team_events.get(mid) if mid else None
+    if not ev:
+        await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
+        return
+    ev.setdefault("attente", [])
+    user_id = str(interaction.user.id)
+    joueur = {"id": user_id, "pseudo": interaction.user.display_name}
+    places = ev.get("places", PLACES_DEFAUT)
+    inscrit = any(p["id"] == user_id for p in ev["presents"])
+    en_attente = any(p["id"] == user_id for p in ev["attente"])
+    promus = []
+    info = None
 
-    async def _repondre(self, interaction, action):
-        ev = team_events.get(str(interaction.message.id))
-        if not ev:
-            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
-            return
-        ev.setdefault("attente", [])
-        user_id = str(interaction.user.id)
-        joueur = {"id": user_id, "pseudo": interaction.user.display_name}
-        places = ev.get("places", PLACES_DEFAUT)
-        inscrit = any(p["id"] == user_id for p in ev["presents"])
-        en_attente = any(p["id"] == user_id for p in ev["attente"])
-        promus = []
-        info = None
-
-        if action in ("presents", "attente"):
-            if inscrit or (en_attente and len(ev["presents"]) >= places):
-                if action == "presents":
-                    # Re-clic sur Présent : menu privé pour ajouter des amis
-                    mid = str(interaction.message.id)
-                    actuel, maximum = len(invites_de(ev, user_id)), max_invites(ev)
-                    if maximum == 0 and actuel == 0:
-                        await interaction.response.send_message(
-                            f"Pas d'amis en plus sur une session de {places} place{'s' if places > 1 else ''}.", ephemeral=True, delete_after=DELAI_EPHEMERE)
-                    else:
-                        await interaction.response.send_message(
-                            f"👥 Tu viens avec des amis ? Ils prennent une place chacun ({maximum} max).",
-                            view=InvitesView(mid, actuel, maximum), ephemeral=True)
-                        effacer_plus_tard(interaction, 300)   # menu expiré : on l'efface
+    if action in ("presents", "attente"):
+        if inscrit or (en_attente and len(ev["presents"]) >= places):
+            if action == "presents":
+                # Re-clic sur Présent : menu privé pour ajouter des amis
+                actuel, maximum = len(invites_de(ev, user_id)), max_invites(ev)
+                if maximum == 0 and actuel == 0:
+                    await interaction.response.send_message(
+                        f"Pas d'amis en plus sur une session de {places} place{'s' if places > 1 else ''}.", ephemeral=True, delete_after=DELAI_EPHEMERE)
                 else:
-                    # Déjà à sa place : on ne touche à rien
-                    await interaction.response.defer()
-                return
-            retirer_team(ev, user_id)
-            if len(ev["presents"]) < places:
-                ev["presents"].append(joueur)
+                    await interaction.response.send_message(
+                        f"👥 Tu viens avec des amis ? Ils prennent une place chacun ({maximum} max).",
+                        view=InvitesView(mid, actuel, maximum), ephemeral=True)
+                    effacer_plus_tard(interaction, 300)   # menu expiré : on l'efface
+            elif depuis_fil:
+                await interaction.response.send_message("⏳ Tu es déjà en file d'attente.", ephemeral=True,
+                                                        delete_after=DELAI_EPHEMERE)
             else:
-                ev["attente"].append(joueur)
-                info = (f"⏳ Session complète : tu es en file d'attente (position {len(ev['attente'])}). "
-                        f"Tu recevras un MP si une place se libère.")
-        else:  # Sortir (avec ses invités)
-            retirer_team(ev, user_id)
-            # Des places se libèrent : les premiers de la file d'attente les prennent
-            promus = remplir_places(ev)
+                # Déjà à sa place : on ne touche à rien
+                await interaction.response.defer()
+            return
+        retirer_team(ev, user_id)
+        if len(ev["presents"]) < places:
+            ev["presents"].append(joueur)
+        else:
+            ev["attente"].append(joueur)
+            info = (f"⏳ Session complète : tu es en file d'attente (position {len(ev['attente'])}). "
+                    f"Tu recevras un MP si une place se libère.")
+    else:  # Sortir (avec ses invités)
+        retirer_team(ev, user_id)
+        # Des places se libèrent : les premiers de la file d'attente les prennent
+        promus = remplir_places(ev)
 
-        save_team_events()   # avant de répondre : l'inscription est gardée même si Discord échoue
+    save_team_events()   # avant de répondre : l'inscription est gardée même si Discord échoue
+    if depuis_fil:
+        # Bouton sous le message du fil : confirmation privée + mise à jour de l'annonce du salon
+        if action is None:
+            texte = "🚪 Tu es sorti de la session." if inscrit or en_attente else "Tu n'étais pas inscrit."
+        else:
+            texte = info or f"✅ Tu es inscrit ({len(ev['presents'])}/{places})."
+        await interaction.response.send_message(texte, ephemeral=True, delete_after=DELAI_EPHEMERE)
+        await maj_annonce(ev, mid)
+    else:
         await interaction.response.edit_message(embed=build_team_embed(ev), view=TeamView())
         if info:
             msg = await interaction.followup.send(info, ephemeral=True, wait=True)
             await msg.delete(delay=DELAI_EPHEMERE)
 
-        # MP « place libérée » / « session complète »
-        await prevenir_complet(ev, interaction.message.jump_url, promus)
+    # MP « place libérée » / « session complète »
+    await prevenir_complet(ev, lien_vers_annonce(ev, mid, interaction), promus)
+
+class TeamView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _repondre(self, interaction, action):
+        await repondre_bouton(interaction, str(interaction.message.id), action)
 
     @discord.ui.button(label="✅ Présent", style=discord.ButtonStyle.success, custom_id="team_present")
     async def present(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -1104,17 +1121,49 @@ async def supprimer_fil_perso(fil, user_id):
     except discord.HTTPException as e:
         print(f"⚠️ Fil perso {fil.id} non supprimé (permission 'Gérer les fils' ?) : {e}")
 
+def session_du_fil(thread_id):
+    """Session dont le fil de discussion est thread_id -> (mid, ev) ou (None, None)."""
+    for mid, ev in sessions():
+        if isinstance(ev, dict) and ev.get("thread_id") == thread_id:
+            return mid, ev
+    return None, None
+
+class FilView(discord.ui.View):
+    """Boutons sous le message du bot dans le fil : l'annonce affichée en haut du fil est grisée
+    par Discord, on peut donc s'inscrire ici sans revenir au salon."""
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    async def _repondre(self, interaction, action):
+        mid, _ = session_du_fil(interaction.channel.id)
+        await repondre_bouton(interaction, mid, action, depuis_fil=True)
+
+    @discord.ui.button(label="✅ Présent", style=discord.ButtonStyle.success, custom_id="fil_present")
+    async def present(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._repondre(interaction, "presents")
+
+    @discord.ui.button(label="🚪 Sortir", style=discord.ButtonStyle.secondary, custom_id="fil_sortir")
+    async def sortir(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._repondre(interaction, None)
+
+    @discord.ui.button(label="⏳ File d'attente", style=discord.ButtonStyle.primary, custom_id="fil_attente")
+    async def attente(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._repondre(interaction, "attente")
+
 async def notifier_role(ev, auteur):
-    """Ping du rôle choisi dans /config, dans le fil : ses membres sont notifiés et le fil
-    apparaît sous le salon dans leur liste. Sans rôle configuré : rien."""
-    role_id = (config_de(ev.get("guild_id")) or {}).get("role_id")
-    if not role_id or not ev.get("thread_id"):
+    """1er message du bot dans le fil, avec les boutons d'inscription. Ping du rôle choisi dans /config
+    s'il y en a un : ses membres sont notifiés et le fil apparaît sous le salon dans leur liste."""
+    if not ev.get("thread_id"):
         return
+    role_id = (config_de(ev.get("guild_id")) or {}).get("role_id")
+    debut = f"📣 <@&{role_id}> nouvelle session" if role_id else "🎮 Nouvelle session"
     try:
         fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
-        await fil.send(f"📣 <@&{role_id}> nouvelle session organisée par {auteur.mention} : "
-                       f"**{ev['description']}**, <t:{ev['start_ts']}:F>",
-                       allowed_mentions=discord.AllowedMentions(everyone=False, users=False, roles=[discord.Object(role_id)]))
+        await fil.send(f"{debut} organisée par {auteur.mention} : "
+                       f"**{ev['description']}**, <t:{ev['start_ts']}:F>\n👇 Inscris-toi ici",
+                       view=FilView(),
+                       allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                                                                roles=[discord.Object(role_id)] if role_id else False))
     except Exception as e:
         print(f"⚠️ Notification du rôle impossible : {e}")
 
