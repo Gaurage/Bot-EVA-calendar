@@ -457,14 +457,15 @@ def build_team_embed(ev):
     n = ev.get("nb_sessions", 1)
     d = ev.get("duree", DUREE_SESSION)
     orga = f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?")
-    # Titre : jour, date, description, heure (la description n'est donc plus répétée dessous)
-    titre = "📅 " + libelle_session(ev.get("description", ev["titre"]), datetime.fromtimestamp(ts, PARIS))
-    bloc_desc = ""
+    # Titre : jour, date et heure ; la description juste en dessous, en gros
+    debut = datetime.fromtimestamp(ts, PARIS)
+    titre = f"📅 {JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {debut:%Hh%M}"
+    bloc_desc = f"### {discord.utils.escape_markdown(ev.get('description', ev['titre'])[:200])}\n"
     embed = discord.Embed(
         title=titre[:256],
         description=(
-            f"**Organisé par** {orga}\n\n"
             f"{bloc_desc}"
+            f"**Organisé par** {orga}\n\n"
             f"**Quand**\n<t:{ts}:F> · <t:{ts}:R>\n\n"
             f"**Sessions ({n} × {d}min)**\n{horaires_sessions(ev)}\n\n"
             f"{ligne_reservation(ev)}\n\n{ligne_agenda(ev)}"
