@@ -1007,14 +1007,17 @@ class TeamView(discord.ui.View):
     @discord.ui.button(label="⚙️ Gérer", style=discord.ButtonStyle.secondary, custom_id="team_gerer")
     async def gerer(self, interaction: discord.Interaction, button: discord.ui.Button):
         mid = str(interaction.message.id)
-        ev = team_events.get(mid)
-        if not ev:
-            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
-        elif not peut_gerer(interaction, ev):
-            await interaction.response.send_message("⛔ Seuls l'organisateur, les modos et les admins peuvent gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
-        else:
-            await interaction.response.send_message(view=GererView(mid), ephemeral=True)
-            effacer_plus_tard(interaction, 600)   # menu expiré : on l'efface
+        await ouvrir_gerer(interaction, mid, team_events.get(mid))
+
+async def ouvrir_gerer(interaction, mid, ev):
+    """Menu ⚙️ Gérer (depuis l'annonce ou depuis le fil)."""
+    if not ev:
+        await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
+    elif not peut_gerer(interaction, ev):
+        await interaction.response.send_message("⛔ Seuls l'organisateur, les modos et les admins peuvent gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
+    else:
+        await interaction.response.send_message(view=GererView(mid), ephemeral=True)
+        effacer_plus_tard(interaction, 600)   # menu expiré : on l'efface
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Commande /orga
@@ -1149,6 +1152,11 @@ class FilView(discord.ui.View):
     @discord.ui.button(label="⏳ File d'attente", style=discord.ButtonStyle.primary, custom_id="fil_attente")
     async def attente(self, interaction: discord.Interaction, button: discord.ui.Button):
         await self._repondre(interaction, "attente")
+
+    @discord.ui.button(label="⚙️ Gérer", style=discord.ButtonStyle.secondary, custom_id="fil_gerer")
+    async def gerer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        mid, ev = session_du_fil(interaction.channel.id)
+        await ouvrir_gerer(interaction, mid, ev)
 
 async def notifier_role(ev, auteur):
     """1er message du bot dans le fil, avec les boutons d'inscription. Ping du rôle choisi dans /config
