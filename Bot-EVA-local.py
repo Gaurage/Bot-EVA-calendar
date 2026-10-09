@@ -806,7 +806,7 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
         else:
             perso = ""
         embed = discord.Embed(
-            title=f"✏️ {auteur} a modifié {nom} · {desc}"[:256],
+            title=f"✏️ MODIFIÉ par {auteur} · · {libelle_session(desc, debut)}"[:256],
             description=(perso + resume + "\n\n" + "\n\n".join(liens_session(ev, lien)))[:4096],
             color=0x3498DB
         )
@@ -860,9 +860,9 @@ async def prevenir_annulation(mid, ev, auteur=None):
     """Session déjà retirée de team_events : MP aux joueurs, suppression du fil et de l'annonce.
     auteur=None : l'annonce a été supprimée à la main sur Discord."""
     nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
-    sujet = f"{nom} · {ev.get('description', ev['titre'])}"
+    sujet = libelle_session(ev.get("description", ev["titre"]), datetime.fromtimestamp(ev["start_ts"], PARIS))
     embed = discord.Embed(
-        title=(f"❌ {auteur.display_name} a annulé {sujet}" if auteur else f"❌ Session annulée : {sujet}")[:256],
+        title=(f"❌ ANNULÉE par {auteur.display_name} · · {sujet}" if auteur else f"❌ ANNULÉE · · {sujet}")[:256],
         description=(f"📅 <t:{ev['start_ts']}:F>\n\n"
                      "La session n'aura pas lieu. Si tu avais réservé, pense à annuler ta réservation EVA "
                      "et à retirer la partie de ton agenda."),
