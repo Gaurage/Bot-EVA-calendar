@@ -451,11 +451,13 @@ def build_team_embed(ev):
     n = ev.get("nb_sessions", 1)
     d = ev.get("duree", DUREE_SESSION)
     orga = f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?")
-    # La description est déjà dans le titre ; on ne la répète que pour les anciennes annonces
-    bloc_desc = ("" if ev["titre"].startswith(ev["description"])
-                 else f"**Description**\n{discord.utils.escape_markdown(ev['description'][:1000])}\n\n")
+    # Titre : jour, date, description, heure (la description n'est donc plus répétée dessous)
+    debut = datetime.fromtimestamp(ts, PARIS)
+    jour = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"][debut.weekday()]
+    titre = f"📅 {jour} {debut:%d/%m} · {ev.get('description', ev['titre'])[:150]} · {debut:%Hh%M}"
+    bloc_desc = ""
     embed = discord.Embed(
-        title=f"🎮 {ev['titre']}"[:256],
+        title=titre[:256],
         description=(
             f"**Organisé par** {orga}\n\n"
             f"{bloc_desc}"
