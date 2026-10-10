@@ -466,7 +466,7 @@ def build_team_embed(ev):
             else f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?"))
     # Titre : jour, date et heure ; la description juste en dessous, en gros
     debut = datetime.fromtimestamp(ts, PARIS)
-    titre = f"📅 {JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {debut:%Hh%M}"
+    titre = f"📅 {JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · 🕙 {debut:%Hh%M}"   # titre de l'annonce uniquement
     bloc_desc = f"### {discord.utils.escape_markdown(ev.get('description', ev['titre'])[:200])}\n"
     embed = discord.Embed(
         title=titre[:256],
