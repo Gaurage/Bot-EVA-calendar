@@ -262,7 +262,10 @@ def joueur_lien(p):
     """Pseudo en texte (une mention <@id> s'affiche en chiffres sur Discord mobile quand
     le membre n'est pas chargé dans l'appli)."""
     nom = discord.utils.escape_markdown(p.get("pseudo") or "?")
-    return f"👤 {nom}" if p.get("invite_par") else nom
+    if p.get("invite_par"):
+        return f"👤 {nom}"
+    # 💬 : ouvre le profil Discord du joueur (bouton « Message » pour lui écrire en privé)
+    return f"{nom} [💬](https://discord.com/users/{p['id']})"
 
 def liste_champ(lignes, vide="_Personne pour l'instant_"):
     """Assemble des lignes sans dépasser la limite Discord (1024) ni couper un pseudo."""
