@@ -334,13 +334,15 @@ async def supprimer_mp(channel_id, message_id):
 JOURS_LONGS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
 
 def libelle_session(desc, debut, max_desc=150):
-    """Ex : « Jeudi 15/10 · · Mix Chill · · 17h10 » (titre de l'annonce, nom du fil…)."""
-    return f"{JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {desc[:max_desc]} · · {debut:%Hh%M}"
+    """Format commun (fil, MP) : « Dimanche 11/10 · · 18h30 · · Mix Chill »."""
+    return f"{JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {debut:%Hh%M} · · {desc[:max_desc]}"
+
+def libelle_ev(ev):
+    return libelle_session(ev.get("description", ev["titre"]), datetime.fromtimestamp(ev["start_ts"], PARIS))
 
 def nom_fil(desc, debut):
-    """Nom du fil : date et heure d'abord (lisibles même quand Discord coupe le nom dans la colonne
-    de gauche), puis la description. 100 caractères max."""
-    return f"{JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {debut:%Hh%M} · · {desc[:65]}"
+    """Nom du fil (100 caractères max) : date et heure restent lisibles même si Discord coupe la fin."""
+    return libelle_session(desc, debut, 65)
 
 async def creer_fil(msg, nom):
     """Crée un fil de discussion sous l'annonce. Renvoie l'id du fil ou None."""
@@ -501,10 +503,10 @@ async def envoyer_dm_complet(user_id, ev, lien_annonce, promu=False):
     nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
     # Texte saisi par les joueurs : neutralisé pour qu'il ne puisse pas créer de lien cliquable
     joueurs = "\n".join(f"{i}. {discord.utils.escape_markdown(p['pseudo'])}" for i, p in enumerate(ev["presents"], 1))
-    titre = "🎉 Une place s'est libérée, tu es inscrit !" if promu else "✅ Session complète !"
+    titre = f"{'🎉 PLACE LIBÉRÉE, TU ES INSCRIT' if promu else '✅ COMPLÈTE'} · · {libelle_ev(ev)}"
     liens = liens_session(ev, lien_annonce)
     embed = discord.Embed(
-        title=titre,
+        title=titre[:256],
         description=(
             f"**{nom}** · {discord.utils.escape_markdown(ev.get('description', ev['titre']))}\n\n"
             f"📅 **Quand**\n<t:{ts}:F>\n\n"
@@ -520,13 +522,13 @@ async def envoyer_rappel(user_id, ev, lien_annonce):
     n = ev.get("nb_sessions", 1)
     cfg = config_de(ev.get("guild_id")) or {}
     nom = cfg.get("nom", "EVA")
-    description = f"🕙 {horaires_sessions(ev)} ({n} session{'s' if n > 1 else ''})"
+    description = f"📍 **{nom}**\n🕙 {horaires_sessions(ev)} ({n} session{'s' if n > 1 else ''})"
     if cfg.get("telephone"):
         description += f"\n\n🚗 **Un retard ? Appelle la salle : {cfg['telephone']}**"
     if lien_annonce:
         description += f"\n\n**[💬 Voir l'organisation sur Discord]({lien_annonce})**"
     embed = discord.Embed(
-        title=f"⏰ RAPPEL : Ta partie à {nom.upper()} c'est dans 1h : {ev.get('description', ev['titre'])}"[:256],
+        title=f"⏰ RAPPEL DANS 1H · · {libelle_ev(ev)}"[:256],
         description=description,
         color=0xF1C40F
     )
@@ -869,7 +871,7 @@ async def prevenir_annulation(mid, ev, auteur=None):
     """Session déjà retirée de team_events : MP aux joueurs, suppression du fil et de l'annonce.
     auteur=None : l'annonce a été supprimée à la main sur Discord."""
     nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
-    sujet = libelle_session(ev.get("description", ev["titre"]), datetime.fromtimestamp(ev["start_ts"], PARIS))
+    sujet = libelle_ev(ev)
     embed = discord.Embed(
         title=(f"❌ ANNULÉE par {auteur.display_name} · · {sujet}" if auteur else f"❌ ANNULÉE · · {sujet}")[:256],
         description=(f"📅 <t:{ev['start_ts']}:F>\n\n"
