@@ -1226,14 +1226,14 @@ class ConfigModal(discord.ui.Modal, title="Réglages du bot"):
                                          default=str(cfg["location_id"]) if cfg.get("location_id") else None)
         self.descriptions = discord.ui.TextInput(max_length=50, required=False, placeholder=DESCRIPTIONS_DEFAUT[0],
                                                  default=(cfg.get("descriptions") or DESCRIPTIONS_DEFAUT)[0])
-        self.role = discord.ui.RoleSelect(required=False, min_values=0, max_values=1, placeholder="Aucun rôle (pas de notification)",
+        self.role = discord.ui.RoleSelect(required=False, min_values=0, max_values=1, placeholder="Aucun rôle : fil visible seulement chez les inscrits",
                                           default_values=[discord.Object(cfg["role_id"])] if cfg.get("role_id") else [])
         for texte, aide, champ in (
             ("🏟️ Nom de la salle", CREDIT_COURT, self.nom),
             ("📞 Téléphone de la salle", "Affiché dans le rappel 1h avant (en cas de retard)", self.telephone),
             ("🎟️ Lien de réservation", "Colle l'adresse de la page de réservation de ta salle (ou juste son numéro, ex : 52)", self.lien),
             ("📝 Description par défaut", "Pré-remplie dans /orga (modifiable à chaque session)", self.descriptions),
-            ("📣 Afficher les fils de partie chez", "Facultatif. Ex : @Abonnés (sans notif). Sans rôle, le fil n'apparaît que chez les inscrits", self.role),
+            ("📣 Afficher les fils de partie chez", "Facultatif. Ex : @Abonnés. Sans rôle, le fil n'apparaît que chez les inscrits", self.role),
         ):
             self.add_item(discord.ui.Label(text=texte, description=aide, component=champ))
 
