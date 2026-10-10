@@ -1220,7 +1220,7 @@ class ConfigModal(discord.ui.Modal, title="Réglages du bot"):
             ("📞 Téléphone de la salle", "Affiché dans le rappel 1h avant (en cas de retard)", self.telephone),
             ("🎟️ Lien de réservation", "Colle l'adresse de la page de réservation de ta salle (ou juste son numéro, ex : 52)", self.lien),
             ("📝 Description par défaut", "Pré-remplie dans /orga (modifiable à chaque session)", self.descriptions),
-            ("📣 Rôle à notifier (facultatif)", "Ex : @Abonnés. Ce rôle est notifié dans le fil à chaque nouvelle session", self.role),
+            ("📣 Rôle qui voit les fils (facultatif)", "Ex : @Abonnés. Le fil s'affiche chez eux, sans son ni notification", self.role),
         ):
             self.add_item(discord.ui.Label(text=texte, description=aide, component=champ))
 
@@ -1292,7 +1292,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
         f"• Téléphone : **{cfg['telephone']}**\n"
         f"• Réservation : [calendrier de la salle (identifiant {location_id})](<{test}>)\n"
         f"• Description par défaut : {cfg['descriptions'][0]}\n"
-        f"• Rôle notifié à chaque nouvelle session : {role_txt}\n"
+        f"• Rôle qui voit les fils : {role_txt} (mention silencieuse : le fil s'affiche chez eux, sans son ni notification)\n"
         "\n"
         "Clique sur le lien pour vérifier qu'il ouvre bien ta salle. "
         "Tu peux relancer `/config` à tout moment pour modifier (le formulaire est pré-rempli).",
