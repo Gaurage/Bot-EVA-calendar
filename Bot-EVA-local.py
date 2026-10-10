@@ -338,8 +338,9 @@ def libelle_session(desc, debut, max_desc=150):
     return f"{JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {desc[:max_desc]} · · {debut:%Hh%M}"
 
 def nom_fil(desc, debut):
-    """Nom du fil (100 caractères max sur Discord)."""
-    return libelle_session(desc, debut, 65)
+    """Nom du fil : date et heure d'abord (lisibles même quand Discord coupe le nom dans la colonne
+    de gauche), puis la description. 100 caractères max."""
+    return f"{JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · {debut:%Hh%M} · · {desc[:65]}"
 
 async def creer_fil(msg, nom):
     """Crée un fil de discussion sous l'annonce. Renvoie l'id du fil ou None."""
