@@ -928,6 +928,16 @@ class ConfirmerAnnulation(discord.ui.LayoutView):
         await interaction.response.edit_message(view=vue_texte("👍 La session est conservée."))
         effacer_plus_tard(interaction)
 
+async def ajouter_au_fil(ev, membre):
+    """Ajoute le joueur au fil : il apparaît sous le salon dans sa colonne de gauche (sans notification)."""
+    if not ev.get("thread_id"):
+        return
+    try:
+        fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
+        await fil.add_user(membre)
+    except discord.HTTPException as e:
+        print(f"⚠️ Ajout au fil impossible ({membre.id}) : {e}")
+
 async def repondre_bouton(interaction, mid, action, depuis_fil=False):
     """Clic sur Présent / Sortir / File d'attente, depuis l'annonce ou depuis le message du fil.
     action : "presents", "attente" ou None (Sortir)."""
@@ -991,6 +1001,8 @@ async def repondre_bouton(interaction, mid, action, depuis_fil=False):
             msg = await interaction.followup.send(info, ephemeral=True, wait=True)
             await msg.delete(delay=DELAI_EPHEMERE)
 
+    if action is not None:
+        await ajouter_au_fil(ev, interaction.user)
     # MP « place libérée » / « session complète »
     await prevenir_complet(ev, lien_vers_annonce(ev, mid, interaction), promus)
 
@@ -1117,6 +1129,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
     if team_events.get(mid) is ev:
         ev["thread_id"] = fil
         save_team_events()
+        await ajouter_au_fil(ev, interaction.user)   # l'organisateur voit son fil dans sa colonne
         await notifier_role(ev, interaction.user)
     elif fil:   # session annulée pendant la création du fil
         await supprimer_salon_ou_message(fil)
@@ -1220,7 +1233,7 @@ class ConfigModal(discord.ui.Modal, title="Réglages du bot"):
             ("📞 Téléphone de la salle", "Affiché dans le rappel 1h avant (en cas de retard)", self.telephone),
             ("🎟️ Lien de réservation", "Colle l'adresse de la page de réservation de ta salle (ou juste son numéro, ex : 52)", self.lien),
             ("📝 Description par défaut", "Pré-remplie dans /orga (modifiable à chaque session)", self.descriptions),
-            ("📣 Rôle qui voit les fils (facultatif)", "Ex : @Abonnés. Le fil s'affiche chez eux, sans son ni notification", self.role),
+            ("📣 Afficher les fils de partie chez", "Facultatif. Ex : @Abonnés (sans notif). Sans rôle, le fil n'apparaît que chez les inscrits", self.role),
         ):
             self.add_item(discord.ui.Label(text=texte, description=aide, component=champ))
 
@@ -1292,7 +1305,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
         f"• Téléphone : **{cfg['telephone']}**\n"
         f"• Réservation : [calendrier de la salle (identifiant {location_id})](<{test}>)\n"
         f"• Description par défaut : {cfg['descriptions'][0]}\n"
-        f"• Rôle qui voit les fils : {role_txt} (mention silencieuse : le fil s'affiche chez eux, sans son ni notification)\n"
+        f"• Fils de partie affichés chez : {role_txt} (sans notification ; les inscrits voient toujours le fil)\n"
         "\n"
         "Clique sur le lien pour vérifier qu'il ouvre bien ta salle. "
         "Tu peux relancer `/config` à tout moment pour modifier (le formulaire est pré-rempli).",
