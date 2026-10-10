@@ -347,7 +347,7 @@ def nom_fil(desc, debut):
 async def creer_fil(msg, nom):
     """Crée un fil de discussion sous l'annonce. Renvoie l'id du fil ou None."""
     try:
-        fil = await msg.create_thread(name=nom[:100], auto_archive_duration=1440)
+        fil = await msg.create_thread(name=nom[:100], auto_archive_duration=10080)   # veille après 7 jours sans message
         return fil.id
     except (discord.HTTPException, ValueError, TypeError) as e:
         print(f"⚠️ Fil impossible (permission 'Créer des fils publics' ?) : {e}")
@@ -1384,6 +1384,21 @@ async def nettoyage_j1():
                 await supprimer_salon_ou_message(ev["channel_id"], int(mid))
         except Exception as e:
             print(f"⚠️ Nettoyage session {mid} : {e}")
+    # Fils des parties à venir : Discord les met en veille (archive) faute de messages,
+    # ils disparaissent alors de la colonne de gauche. On les réveille jusqu'à la fin de la partie.
+    for mid, ev in sessions():
+        try:
+            fin = ev["start_ts"] + ev.get("nb_sessions", 1) * ev.get("duree", DUREE_SESSION) * 60
+            if not ev.get("thread_id") or maintenant > fin:
+                continue
+            fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
+            if getattr(fil, "archived", False):
+                await fil.edit(archived=False, auto_archive_duration=10080)
+                print(f"🔔 Fil {ev['thread_id']} réveillé (session {mid})")
+        except discord.NotFound:
+            pass
+        except Exception as e:
+            print(f"⚠️ Réveil du fil de la session {mid} : {e}")
     # Réponses drôles en MP : effacées 24h après leur envoi
     vieilles = []
     try:
