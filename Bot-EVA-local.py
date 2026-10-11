@@ -1198,6 +1198,8 @@ async def notifier_role(ev, auteur):
                              silent=True,   # @silent : le fil apparaît chez les membres du rôle, sans notification
                              allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
                                                                       roles=[discord.Object(role_id)] if role_id else False))
+        ev["boutons_verifies"] = True
+        save_team_events()
         if role_id:
             # Le fil est déjà ajouté chez les membres du rôle : on retire le tag pour ne pas l'afficher
             await asyncio.sleep(5)
@@ -1369,12 +1371,26 @@ async def supprimer_salon_ou_message(channel_id, message_id=None):
 
 RELANCE_HEURES = 20   # fil sans message depuis ce délai : Discord le retire de la colonne de gauche
 
+async def fil_a_des_boutons(fil):
+    """Le fil contient-il déjà un message du bot avec les boutons (fils créés avant cette fonction : non) ?"""
+    async for m in fil.history(limit=100):
+        if m.author.id == bot.user.id and m.components:
+            return True
+    return False
+
 async def relancer_fil(fil, ev):
     """Fil silencieux depuis RELANCE_HEURES : le bot poste un « état de la partie » (silencieux, avec les
     boutons) et supprime le précédent. Le fil remonte ainsi dans la colonne de gauche jusqu'à la partie.
     Si quelqu'un a écrit récemment, le fil est déjà actif : on ne poste rien."""
+    if not ev.get("boutons_verifies"):
+        # Une seule fois par session : les anciens fils sans boutons en reçoivent tout de suite
+        ev["boutons_verifies"] = True
+        save_team_events()
+        force = not await fil_a_des_boutons(fil)
+    else:
+        force = False
     dernier = discord.utils.snowflake_time(fil.last_message_id) if fil.last_message_id else fil.created_at
-    if dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
+    if not force and dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
         return
     debut = datetime.fromtimestamp(ev["start_ts"], PARIS)
     ecart = (debut.date() - datetime.now(PARIS).date()).days
