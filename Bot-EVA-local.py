@@ -802,7 +802,9 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
         try:
             fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
             await fil.edit(name=nom_fil(desc, debut))
-            await fil.send(f"✏️ {interaction.user.mention} a modifié la session :\n\n{resume}")
+            await fil.send(f"✏️ {interaction.user.mention} a modifié la session :\n\n{resume}",
+                           silent=True,   # les inscrits ont déjà le MP : pas de notification en double
+                           allowed_mentions=discord.AllowedMentions.none())
         except Exception as e:
             print(f"⚠️ Fil non mis à jour : {e}")
 
