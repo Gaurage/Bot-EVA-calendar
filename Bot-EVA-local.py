@@ -1198,8 +1198,6 @@ async def notifier_role(ev, auteur):
                              silent=True,   # @silent : le fil apparaît chez les membres du rôle, sans notification
                              allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
                                                                       roles=[discord.Object(role_id)] if role_id else False))
-        ev["boutons_verifies"] = True
-        save_team_events()
         if role_id:
             # Le fil est déjà ajouté chez les membres du rôle : on retire le tag pour ne pas l'afficher
             await asyncio.sleep(5)
@@ -1302,7 +1300,6 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
         "location_id": location_id,
         "descriptions": liste or DESCRIPTIONS_DEFAUT,
         "role_id": ancien.get("role_id") if role_id is GARDER else role_id,
-        "role_abonnes_remis": True,   # /config passé par un admin : son choix de rôle prime, plus de remise auto
     }
     team_events[cle] = cfg
     save_team_events()
@@ -1371,26 +1368,12 @@ async def supprimer_salon_ou_message(channel_id, message_id=None):
 
 RELANCE_HEURES = 20   # fil sans message depuis ce délai : Discord le retire de la colonne de gauche
 
-async def fil_a_des_boutons(fil):
-    """Le fil contient-il déjà un message du bot avec les boutons (fils créés avant cette fonction : non) ?"""
-    async for m in fil.history(limit=100):
-        if m.author.id == bot.user.id and m.components:
-            return True
-    return False
-
 async def relancer_fil(fil, ev):
     """Fil silencieux depuis RELANCE_HEURES : le bot poste un « état de la partie » (silencieux, avec les
     boutons) et supprime le précédent. Le fil remonte ainsi dans la colonne de gauche jusqu'à la partie.
     Si quelqu'un a écrit récemment, le fil est déjà actif : on ne poste rien."""
-    if not ev.get("boutons_verifies"):
-        # Une seule fois par session : les anciens fils sans boutons en reçoivent tout de suite
-        ev["boutons_verifies"] = True
-        save_team_events()
-        force = not await fil_a_des_boutons(fil)
-    else:
-        force = False
     dernier = discord.utils.snowflake_time(fil.last_message_id) if fil.last_message_id else fil.created_at
-    if not force and dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
+    if dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
         return
     debut = datetime.fromtimestamp(ev["start_ts"], PARIS)
     ecart = (debut.date() - datetime.now(PARIS).date()).days
@@ -1541,22 +1524,6 @@ async def on_message(message):
 # ═══════════════════════════════════════════════════════════════════════════
 _deja_pret = False
 
-def remettre_role_abonnes():
-    """Une seule fois (accord des admins d'EVA Lyon Sud, oct. 2026) : le rôle « Abonnés » avait été retiré
-    de /config à cause des notifications, qui sont maintenant silencieuses. On le remet s'il est vide.
-    Marqué comme fait : si un admin le revide ensuite avec /config, son choix est respecté."""
-    for guild in bot.guilds:
-        cfg = team_events.get(f"_config_{guild.id}")
-        if not cfg or cfg.get("role_id") or cfg.get("role_abonnes_remis"):
-            continue
-        role = next((r for r in guild.roles if r.name.strip().lower() == "abonnés"), None)
-        if role is None:
-            continue
-        cfg["role_id"] = role.id
-        cfg["role_abonnes_remis"] = True
-        save_team_events()
-        print(f"📣 Rôle @{role.name} remis dans /config pour {guild.name}")
-
 @bot.event
 async def on_ready():
     global _deja_pret
@@ -1564,7 +1531,6 @@ async def on_ready():
         return
     _deja_pret = True
 
-    remettre_role_abonnes()
     if not nettoyage_j1.is_running():
         nettoyage_j1.start()
     if not rappels_1h.is_running():
