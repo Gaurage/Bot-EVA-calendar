@@ -1294,6 +1294,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
         "location_id": location_id,
         "descriptions": liste or DESCRIPTIONS_DEFAUT,
         "role_id": ancien.get("role_id") if role_id is GARDER else role_id,
+        "role_abonnes_remis": True,   # /config passé par un admin : son choix de rôle prime, plus de remise auto
     }
     team_events[cle] = cfg
     save_team_events()
@@ -1489,6 +1490,22 @@ async def on_message(message):
 # ═══════════════════════════════════════════════════════════════════════════
 _deja_pret = False
 
+def remettre_role_abonnes():
+    """Une seule fois (accord des admins d'EVA Lyon Sud, oct. 2026) : le rôle « Abonnés » avait été retiré
+    de /config à cause des notifications, qui sont maintenant silencieuses. On le remet s'il est vide.
+    Marqué comme fait : si un admin le revide ensuite avec /config, son choix est respecté."""
+    for guild in bot.guilds:
+        cfg = team_events.get(f"_config_{guild.id}")
+        if not cfg or cfg.get("role_id") or cfg.get("role_abonnes_remis"):
+            continue
+        role = next((r for r in guild.roles if r.name.strip().lower() == "abonnés"), None)
+        if role is None:
+            continue
+        cfg["role_id"] = role.id
+        cfg["role_abonnes_remis"] = True
+        save_team_events()
+        print(f"📣 Rôle @{role.name} remis dans /config pour {guild.name}")
+
 @bot.event
 async def on_ready():
     global _deja_pret
@@ -1496,6 +1513,7 @@ async def on_ready():
         return
     _deja_pret = True
 
+    remettre_role_abonnes()
     if not nettoyage_j1.is_running():
         nettoyage_j1.start()
     if not rappels_1h.is_running():
