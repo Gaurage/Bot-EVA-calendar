@@ -1538,6 +1538,11 @@ async def on_ready():
     print(f"✅ Bot EVA connecté : {bot.user}")
     print(f"💾 Stockage : {'GitHub (' + GITHUB_REPO + ')' if USE_GITHUB else 'fichier local'}")
     print(f"🎮 Sessions actives : {len(sessions())}")
+    for guild in bot.guilds:
+        p = guild.me.guild_permissions
+        oui = lambda v: "oui" if v else "NON"
+        print(f"🔐 {guild.name} : mentionner tous les rôles = {oui(p.mention_everyone)} · "
+              f"gérer les fils = {oui(p.manage_threads)} · gérer les messages = {oui(p.manage_messages)}")
 
 def _arret_propre(*_):
     """Arrêt demandé par le serveur (SIGTERM) : même fermeture propre qu'un Ctrl+C."""
