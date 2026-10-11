@@ -1188,14 +1188,18 @@ async def notifier_role(ev, auteur):
         return
     role_id = (config_de(ev.get("guild_id")) or {}).get("role_id")
     debut = f"📣 <@&{role_id}> nouvelle session" if role_id else "🎮 Nouvelle session"
+    suite = f" organisée par {auteur.mention} : **{ev['description']}**, <t:{ev['start_ts']}:F>\n👇 Inscris-toi ici"
     try:
         fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
-        await fil.send(f"{debut} organisée par {auteur.mention} : "
-                       f"**{ev['description']}**, <t:{ev['start_ts']}:F>\n👇 Inscris-toi ici",
-                       view=FilView(),
-                       silent=True,   # @silent : le fil apparaît chez les membres du rôle, sans notification
-                       allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
-                                                                roles=[discord.Object(role_id)] if role_id else False))
+        msg = await fil.send(debut + suite,
+                             view=FilView(),
+                             silent=True,   # @silent : le fil apparaît chez les membres du rôle, sans notification
+                             allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                                                                      roles=[discord.Object(role_id)] if role_id else False))
+        if role_id:
+            # Le fil est déjà ajouté chez les membres du rôle : on retire le tag pour ne pas l'afficher
+            await asyncio.sleep(5)
+            await msg.edit(content="🎮 Nouvelle session" + suite)
     except Exception as e:
         print(f"⚠️ Notification du rôle impossible : {e}")
 
