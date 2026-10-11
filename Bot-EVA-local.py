@@ -1361,6 +1361,33 @@ async def supprimer_salon_ou_message(channel_id, message_id=None):
     except discord.HTTPException as e:
         print(f"⚠️ Suppression impossible ({channel_id}/{message_id}) : {e}")
 
+RELANCE_HEURES = 20   # fil sans message depuis ce délai : Discord le retire de la colonne de gauche
+
+async def relancer_fil(fil, ev):
+    """Fil silencieux depuis RELANCE_HEURES : le bot poste un « état de la partie » (silencieux, avec les
+    boutons) et supprime le précédent. Le fil remonte ainsi dans la colonne de gauche jusqu'à la partie.
+    Si quelqu'un a écrit récemment, le fil est déjà actif : on ne poste rien."""
+    dernier = discord.utils.snowflake_time(fil.last_message_id) if fil.last_message_id else fil.created_at
+    if dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
+        return
+    debut = datetime.fromtimestamp(ev["start_ts"], PARIS)
+    ecart = (debut.date() - datetime.now(PARIS).date()).days
+    quand = "Aujourd'hui" if ecart <= 0 else "Demain" if ecart == 1 else f"J-{ecart}"
+    places, n = ev.get("places", PLACES_DEFAUT), len(ev.get("presents", []))
+    reste = (f"il reste {places - n} place{'s' if places - n > 1 else ''}" if n < places
+             else "complet, file d'attente ouverte")
+    msg = await fil.send(f"📅 **{quand}** · · {discord.utils.escape_markdown(libelle_ev(ev))}\n"
+                         f"👥 {n}/{places} inscrits, {reste}\n👇 Inscris-toi ici",
+                         view=FilView(), silent=True, allowed_mentions=discord.AllowedMentions.none())
+    ancien = ev.get("relance_msg_id")
+    ev["relance_msg_id"] = msg.id
+    save_team_events()
+    if ancien:
+        try:
+            await fil.get_partial_message(ancien).delete()
+        except discord.HTTPException:
+            pass
+
 @tasks.loop(minutes=30)
 async def nettoyage_j1():
     """Supprime l'annonce et son fil 24h après la fin de la session."""
@@ -1396,6 +1423,8 @@ async def nettoyage_j1():
             if getattr(fil, "archived", False):
                 await fil.edit(archived=False, auto_archive_duration=10080)
                 print(f"🔔 Fil {ev['thread_id']} réveillé (session {mid})")
+            if maintenant < ev["start_ts"]:
+                await relancer_fil(fil, ev)
         except discord.NotFound:
             pass
         except Exception as e:
