@@ -1558,8 +1558,17 @@ async def on_ready():
     for guild in bot.guilds:
         p = guild.me.guild_permissions
         oui = lambda v: "oui" if v else "NON"
+        role_id = (team_events.get(f"_config_{guild.id}") or {}).get("role_id")
+        role = guild.get_role(role_id) if role_id else None
+        if role_id and role is None:
+            etat_role = " · rôle de /config introuvable (supprimé ?)"
+        elif role:
+            etat_role = (f" · @{role.name} : mentionnable par tous = {oui(role.mentionable)}"
+                         f" → le bot peut l'afficher dans les fils = {oui(role.mentionable or p.mention_everyone)}")
+        else:
+            etat_role = " · aucun rôle dans /config"
         print(f"🔐 {guild.name} : mentionner tous les rôles = {oui(p.mention_everyone)} · "
-              f"gérer les fils = {oui(p.manage_threads)} · gérer les messages = {oui(p.manage_messages)}")
+              f"gérer les fils = {oui(p.manage_threads)} · gérer les messages = {oui(p.manage_messages)}{etat_role}")
 
 def _arret_propre(*_):
     """Arrêt demandé par le serveur (SIGTERM) : même fermeture propre qu'un Ctrl+C."""
