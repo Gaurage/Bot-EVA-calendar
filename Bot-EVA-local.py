@@ -1200,7 +1200,7 @@ async def notifier_role(ev, auteur):
                                                                       roles=[discord.Object(role_id)] if role_id else False))
         if role_id:
             # Le fil est déjà ajouté chez les membres du rôle : on retire le tag pour ne pas l'afficher
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
             await msg.edit(content="🎮 Nouvelle session" + suite)
     except Exception as e:
         print(f"⚠️ Notification du rôle impossible : {e}")
