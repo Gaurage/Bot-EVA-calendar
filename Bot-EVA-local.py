@@ -718,6 +718,7 @@ async def maj_annonce(ev, mid, salon_menu=None):
         await salon.get_partial_message(int(mid)).edit(embed=build_team_embed(ev), view=TeamView())
     except Exception as e:
         print(f"⚠️ Annonce {mid} non mise à jour : {e}")
+    await maj_etat_fil(ev)
 
 def quand(ts):
     return f"<t:{ts}:f>"
@@ -999,6 +1000,7 @@ async def repondre_bouton(interaction, mid, action, depuis_fil=False):
         await maj_annonce(ev, mid)
     else:
         await interaction.response.edit_message(embed=build_team_embed(ev), view=TeamView())
+        await maj_etat_fil(ev)
         if info:
             msg = await interaction.followup.send(info, ephemeral=True, wait=True)
             await msg.delete(delay=DELAI_EPHEMERE)
@@ -1368,6 +1370,29 @@ async def supprimer_salon_ou_message(channel_id, message_id=None):
 
 RELANCE_HEURES = 20   # fil sans message depuis ce délai : Discord le retire de la colonne de gauche
 
+def texte_etat(ev):
+    """Message d'état du fil : compte à rebours, inscrits, places restantes."""
+    debut = datetime.fromtimestamp(ev["start_ts"], PARIS)
+    ecart = (debut.date() - datetime.now(PARIS).date()).days
+    quand = "Aujourd'hui" if ecart <= 0 else "Demain" if ecart == 1 else f"J-{ecart}"
+    places, n = ev.get("places", PLACES_DEFAUT), len(ev.get("presents", []))
+    reste = (f"il reste {places - n} place{'s' if places - n > 1 else ''}" if n < places
+             else "complet, file d'attente ouverte")
+    return (f"📅 **{quand}** · · {discord.utils.escape_markdown(libelle_ev(ev))}\n"
+            f"👥 {n}/{places} inscrits, {reste}\n👇 Inscris-toi ici")
+
+async def maj_etat_fil(ev):
+    """Met à jour le message d'état du fil (s'il existe) après une inscription, une sortie ou une modif."""
+    if not ev.get("relance_msg_id") or not ev.get("thread_id"):
+        return
+    try:
+        fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
+        await fil.get_partial_message(ev["relance_msg_id"]).edit(content=texte_etat(ev))
+    except discord.NotFound:
+        ev.pop("relance_msg_id", None)
+    except discord.HTTPException as e:
+        print(f"⚠️ Message d'état du fil non mis à jour : {e}")
+
 async def relancer_fil(fil, ev):
     """Fil silencieux depuis RELANCE_HEURES : le bot poste un « état de la partie » (silencieux, avec les
     boutons) et supprime le précédent. Le fil remonte ainsi dans la colonne de gauche jusqu'à la partie.
@@ -1375,15 +1400,7 @@ async def relancer_fil(fil, ev):
     dernier = discord.utils.snowflake_time(fil.last_message_id) if fil.last_message_id else fil.created_at
     if dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
         return
-    debut = datetime.fromtimestamp(ev["start_ts"], PARIS)
-    ecart = (debut.date() - datetime.now(PARIS).date()).days
-    quand = "Aujourd'hui" if ecart <= 0 else "Demain" if ecart == 1 else f"J-{ecart}"
-    places, n = ev.get("places", PLACES_DEFAUT), len(ev.get("presents", []))
-    reste = (f"il reste {places - n} place{'s' if places - n > 1 else ''}" if n < places
-             else "complet, file d'attente ouverte")
-    msg = await fil.send(f"📅 **{quand}** · · {discord.utils.escape_markdown(libelle_ev(ev))}\n"
-                         f"👥 {n}/{places} inscrits, {reste}\n👇 Inscris-toi ici",
-                         view=FilView(), silent=True, allowed_mentions=discord.AllowedMentions.none())
+    msg = await fil.send(texte_etat(ev), view=FilView(), silent=True, allowed_mentions=discord.AllowedMentions.none())
     ancien = ev.get("relance_msg_id")
     ev["relance_msg_id"] = msg.id
     save_team_events()
