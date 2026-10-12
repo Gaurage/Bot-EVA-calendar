@@ -282,6 +282,11 @@ def horaires_sessions(ev):
     d = ev.get("duree", DUREE_SESSION)
     return " · ".join(f"<t:{ts + i * d * 60}:t>" for i in range(n))
 
+TITRE_REPLAY = "🎬 REPLAY"   # MP replay : jamais effacé (ni nettoyage, ni « Vider la conversation »)
+
+def est_replay(message):
+    return any((e.title or "").startswith(TITRE_REPLAY) for e in message.embeds)
+
 class VueMP(discord.ui.View):
     """Bouton sous chaque MP du bot : efface tous les messages du bot dans la conversation."""
     def __init__(self):
@@ -293,7 +298,7 @@ class VueMP(discord.ui.View):
         n = 0
         try:
             async for m in interaction.channel.history(limit=500):
-                if m.author.id == bot.user.id:
+                if m.author.id == bot.user.id and not est_replay(m):
                     try:
                         await m.delete()
                         n += 1
@@ -303,6 +308,7 @@ class VueMP(discord.ui.View):
             print(f"⚠️ Historique MP illisible ({interaction.user.id}) : {e}")
         await interaction.followup.send(
             f"🧹 C'est fait : {n} message{'s' if n > 1 else ''} du bot effacé{'s' if n > 1 else ''}.\n"
+            "🎬 Les replays sont conservés.\n"
             "ℹ️ Discord ne permet pas au bot d'effacer **tes** messages : survole-les → ⋯ → Supprimer.",
             ephemeral=True)
         effacer_plus_tard(interaction)
@@ -907,9 +913,11 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
         await interaction.response.defer(ephemeral=True, thinking=True)
         titre = self.titre.value.strip()
         embed = discord.Embed(
-            title=f"🎬 REPLAY · · {libelle_ev(ev)}"[:256],
+            title=f"{TITRE_REPLAY} · · {libelle_ev(ev)}"[:256],
             description=((f"**{discord.utils.escape_markdown(titre)}**\n\n" if titre else "")
-                         + f"**[▶️ Voir le replay]({lien})**"),
+                         + f"**[▶️ Voir le replay]({lien})**\n\n"
+                         + f"📨 Envoyé par **{discord.utils.escape_markdown(interaction.user.display_name)}** "
+                         + f"[💬](https://discord.com/users/{interaction.user.id})"),
             color=0x9B59B6)
         envoyes = 0
         for uid in joueurs:
