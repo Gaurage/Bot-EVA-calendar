@@ -244,7 +244,7 @@ bot = BotEVA(intents=discord.Intents.default(),
              allowed_mentions=discord.AllowedMentions(everyone=False, roles=False))
 tree = app_commands.CommandTree(bot)
 
-DELAI_MENU_GERER = 60   # secondes avant d'effacer le menu ⚙️ Gérer
+DELAI_MENU_GERER = 300   # secondes avant d'effacer le menu ⚙️ Gérer (5 min)
 DELAI_EPHEMERE = 20   # secondes avant d'effacer les messages « Toi seul(e) peux voir celui-ci »
 _taches = set()
 
