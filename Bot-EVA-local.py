@@ -927,7 +927,11 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
                                                     ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
         joueurs = [p["id"] for p in ev.get("presents", []) if not p.get("invite_par")]
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # Le menu ⚙️ est remplacé par le résultat (puis effacé) : plus de boutons qui traînent
+        try:
+            await interaction.response.edit_message(view=vue_texte("⏳ Envoi du replay en cours…"))
+        except discord.HTTPException:   # menu déjà effacé
+            await interaction.response.defer(ephemeral=True, thinking=True)
         titre = self.titre.value.strip()
         embed = discord.Embed(
             title=f"{TITRE_REPLAY} · · {libelle_ev(ev)}"[:256],
@@ -946,15 +950,16 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
             texte = ("🎬 Aucun inscrit sur cette partie, seule une copie t'a été envoyée en MP pour tester.\n"
                      "Le replay est parti… dans le vide intersidéral. Sauf chez toi 🚀\n"
                      "Tu doutais vraiment que le maître **Gaurage** ait pu faire bugger cette ligne de code ? 😎")
-            info = await interaction.followup.send(texte, ephemeral=True, wait=True)
-            await info.delete(delay=60)
-            return
-        info = await interaction.followup.send(
-            f"✅ Replay envoyé en MP à {envoyes}/{len(joueurs)} joueur{'s' if len(joueurs) > 1 else ''} inscrit{'s' if len(joueurs) > 1 else ''}."
-            + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés.")
-            + " Tu en as reçu une copie en MP.",
-            ephemeral=True, wait=True)
-        await info.delete(delay=60)
+        else:
+            texte = (f"✅ Replay envoyé en MP à {envoyes}/{len(joueurs)} joueur{'s' if len(joueurs) > 1 else ''} "
+                     f"inscrit{'s' if len(joueurs) > 1 else ''}."
+                     + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés.")
+                     + " Tu en as reçu une copie en MP.")
+        try:
+            await interaction.edit_original_response(view=vue_texte(texte))
+        except discord.HTTPException:
+            await interaction.followup.send(texte, ephemeral=True)
+        effacer_plus_tard(interaction, 60)
 
 # ── Annuler une session (organisateur, modo ou admin) ─────────────────────────────
 async def prevenir_annulation(mid, ev, auteur=None):
