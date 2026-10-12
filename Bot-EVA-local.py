@@ -24,6 +24,7 @@ PARIS = ZoneInfo("Europe/Paris")
 DUREE_SESSION = 40                      # une session EVA dure toujours 40 min
 PLACES_CHOIX = (8, 10)                  # joueurs par partie EVA : 8 ou 10
 PLACES_TEST = 1                         # option « 1 joueur (test) » réservée aux admins du serveur
+NB_SESSIONS_DEFAUT = 2                  # sessions pré-sélectionnées dans /orga
 NB_SESSIONS_MAX = 4                     # sessions enchaînées au maximum dans une annonce
 MAX_PAR_JOUR = 50                       # sessions créées par jour (anti-spam)
 MAX_PAR_MOIS = 1500                     # sessions créées par mois (reste dans le gratuit Google)
@@ -677,7 +678,7 @@ class SessionModal(discord.ui.Modal):
         super().__init__(title="Modifier la session" if ev else "Nouvelle session EVA", timeout=900)
         self.mid = mid
         debut = datetime.fromtimestamp(ev["start_ts"], PARIS) if ev else None
-        nb = ev.get("nb_sessions", 1) if ev else None
+        nb = ev.get("nb_sessions", 1) if ev else NB_SESSIONS_DEFAUT
         places = ev.get("places", PLACES_DEFAUT) if ev else PLACES_DEFAUT
 
         self.date = discord.ui.Select(placeholder="Choisis le jour", options=options_dates(debut.date() if debut else None))
