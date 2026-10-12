@@ -244,6 +244,7 @@ bot = BotEVA(intents=discord.Intents.default(),
              allowed_mentions=discord.AllowedMentions(everyone=False, roles=False))
 tree = app_commands.CommandTree(bot)
 
+DELAI_MENU_GERER = 60   # secondes avant d'effacer le menu ⚙️ Gérer
 DELAI_EPHEMERE = 20   # secondes avant d'effacer les messages « Toi seul(e) peux voir celui-ci »
 _taches = set()
 
@@ -797,7 +798,11 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     destinataires = avec_organisateur(ev, list(ev["presents"] + ev["attente"]), interaction.user.id)
     positions = {x["id"]: i for i, x in enumerate(ev["attente"], 1)}
     save_team_events()   # avant de répondre : la modification est gardée même si Discord échoue
-    await interaction.response.edit_message(view=vue_texte("✅ Session modifiée : les joueurs sont prévenus en MP."))
+    try:
+        await interaction.response.edit_message(view=vue_texte("✅ Session modifiée : les joueurs sont prévenus en MP."))
+    except discord.HTTPException:
+        # Menu ⚙️ déjà effacé (formulaire rempli en plus d'1 min) : confirmation dans un nouveau message privé
+        await interaction.response.send_message("✅ Session modifiée : les joueurs sont prévenus en MP.", ephemeral=True)
     effacer_plus_tard(interaction)
     await maj_annonce(ev, mid, interaction.channel)
     lien = lien_vers_annonce(ev, mid, interaction)
@@ -856,7 +861,7 @@ def est_modo(interaction):
 
 class GererView(discord.ui.LayoutView):
     def __init__(self, mid, modo=False):
-        super().__init__(timeout=600)
+        super().__init__(timeout=DELAI_MENU_GERER)
         self.mid = mid
         self.add_item(discord.ui.TextDisplay("⚙️ Que veux-tu faire ?"))
         boutons = [bouton("✏️ Modifier", discord.ButtonStyle.primary, self.modifier),
@@ -980,7 +985,7 @@ async def on_raw_message_delete(payload):
     await prevenir_annulation(payload.message_id, ev)
 class ConfirmerAnnulation(discord.ui.LayoutView):
     def __init__(self, mid):
-        super().__init__(timeout=600)
+        super().__init__(timeout=DELAI_MENU_GERER)
         self.mid = mid
         self.add_item(discord.ui.TextDisplay(
             "Annuler cette session ? L'annonce et le fil seront supprimés et les joueurs prévenus en MP."))
@@ -1114,7 +1119,7 @@ async def ouvrir_gerer(interaction, mid, ev):
         await interaction.response.send_message("⛔ Seuls l'organisateur, les modos et les admins peuvent gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
     else:
         await interaction.response.send_message(view=GererView(mid, est_modo(interaction)), ephemeral=True)
-        effacer_plus_tard(interaction, 600)   # menu expiré : on l'efface
+        effacer_plus_tard(interaction, DELAI_MENU_GERER)   # menu expiré : on l'efface
 
 # ═══════════════════════════════════════════════════════════════════════════
 #  Commande /orga
