@@ -287,7 +287,18 @@ def horaires_sessions(ev):
 TITRE_REPLAY = "🎬 REPLAY"   # MP replay : jamais effacé (ni nettoyage, ni « Vider la conversation »)
 
 def est_replay(message):
-    return any((e.title or "").startswith(TITRE_REPLAY) for e in message.embeds)
+    return (message.content.startswith("🎬 http")
+            or any((e.title or "").startswith(TITRE_REPLAY) for e in message.embeds))
+
+async def envoyer_replay(user_id, embed, lien):
+    """MP replay : le cadre, puis le lien seul dans un 2e message pour que Discord affiche l'aperçu (YouTube…)."""
+    msg = await envoyer_mp(user_id, embed)   # sans session : jamais effacé par le nettoyage
+    if msg:
+        try:
+            await msg.channel.send(f"🎬 {lien}")
+        except discord.HTTPException as e:
+            print(f"⚠️ Lien du replay non envoyé à {user_id} : {e}")
+    return msg
 
 class VueMP(discord.ui.View):
     """Bouton sous chaque MP du bot : efface tous les messages du bot dans la conversation."""
@@ -927,11 +938,10 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
             color=0x9B59B6)
         envoyes = 0
         for uid in joueurs:
-            # Lien en texte : Discord affiche l'aperçu (vidéo YouTube…), impossible depuis un embed
-            if await envoyer_mp(uid, embed, contenu=lien):   # sans session : le MP reste après le nettoyage
+            if await envoyer_replay(uid, embed, lien):
                 envoyes += 1
         if str(interaction.user.id) not in joueurs:
-            await envoyer_mp(interaction.user.id, embed, contenu=lien)   # copie pour le modo qui l'envoie
+            await envoyer_replay(interaction.user.id, embed, lien)   # copie pour le modo qui l'envoie
         if not joueurs:
             texte = ("🎬 Aucun inscrit sur cette partie, seule une copie t'a été envoyée en MP pour tester.\n"
                      "Le replay est parti… dans le vide intersidéral. Sauf chez toi 🚀\n"
