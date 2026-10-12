@@ -291,14 +291,8 @@ def est_replay(message):
             or any((e.title or "").startswith(TITRE_REPLAY) for e in message.embeds))
 
 async def envoyer_replay(user_id, embed, lien):
-    """MP replay : le cadre, puis le lien seul dans un 2e message pour que Discord affiche l'aperçu (YouTube…)."""
-    msg = await envoyer_mp(user_id, embed, bouton_vider=False)   # sans session : jamais effacé par le nettoyage
-    if msg:
-        try:
-            await msg.channel.send(f"🎬 {lien}")
-        except discord.HTTPException as e:
-            print(f"⚠️ Lien du replay non envoyé à {user_id} : {e}")
-    return msg
+    """MP replay : un seul cadre, lien en clair dedans (pas d'aperçu)."""
+    return await envoyer_mp(user_id, embed, bouton_vider=False)   # sans session : jamais effacé par le nettoyage
 
 class VueMP(discord.ui.View):
     """Bouton sous chaque MP du bot : efface tous les messages du bot dans la conversation."""
@@ -936,7 +930,7 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
         embed = discord.Embed(
             title=f"{TITRE_REPLAY} · · {libelle_ev(ev)}"[:256],
             description=((f"**{discord.utils.escape_markdown(titre)}**\n\n" if titre else "")
-                         + f"**[▶️ Voir le replay]({lien})**\n\n"
+                         + f"▶️ {lien}\n\n"
                          + f"📨 Envoyé par **{discord.utils.escape_markdown(interaction.user.display_name)}** "
                          + f"[💬](https://discord.com/users/{interaction.user.id})"),
             color=0x9B59B6)
