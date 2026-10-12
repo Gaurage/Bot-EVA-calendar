@@ -308,7 +308,7 @@ class VueMP(discord.ui.View):
         effacer_plus_tard(interaction)
 
 async def envoyer_mp(user_id, embed, ev=None):
-    """Envoie un MP ; si une session est donnée, le retient pour l'effacer à J+1."""
+    """Envoie un MP ; si une session est donnée, le retient pour l'effacer avec la session."""
     if not str(user_id).isdecimal():   # invité sans compte Discord : pas de MP
         return None
     try:
@@ -897,7 +897,7 @@ async def prevenir_annulation(mid, ev, auteur=None):
 @bot.event
 async def on_raw_message_delete(payload):
     """Annonce supprimée à la main (⋯ → Supprimer) : la session est annulée comme avec ⚙️ Gérer.
-    Quand c'est le bot qui supprime (annulation, nettoyage J+1), la session est déjà retirée : rien à faire."""
+    Quand c'est le bot qui supprime (annulation, nettoyage après la partie), la session est déjà retirée : rien à faire."""
     mid = str(payload.message_id)
     ev = team_events.get(mid)
     if not isinstance(ev, dict) or "start_ts" not in ev:
@@ -1321,7 +1321,7 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
     )
 
 # ═══════════════════════════════════════════════════════════════════════════
-#  Tâches automatiques : rappel 1h avant + nettoyage J+1
+#  Tâches automatiques : rappel 1h avant + nettoyage 3h après la partie
 # ═══════════════════════════════════════════════════════════════════════════
 async def lien_de_annonce(mid, ev):
     guild_id = ev.get("guild_id")
@@ -1368,6 +1368,7 @@ async def supprimer_salon_ou_message(channel_id, message_id=None):
     except discord.HTTPException as e:
         print(f"⚠️ Suppression impossible ({channel_id}/{message_id}) : {e}")
 
+NETTOYAGE_HEURES = 3   # annonce, fil et MP supprimés 3h après la fin de la dernière session de 40 min
 RELANCE_HEURES = 20   # fil sans message depuis ce délai : Discord le retire de la colonne de gauche
 
 def texte_etat(ev):
@@ -1412,13 +1413,13 @@ async def relancer_fil(fil, ev):
 
 @tasks.loop(minutes=30)
 async def nettoyage_j1():
-    """Supprime l'annonce et son fil 24h après la fin de la session."""
+    """Supprime l'annonce, son fil et les MP de la session NETTOYAGE_HEURES après la fin de la dernière session."""
     maintenant = datetime.now(timezone.utc).timestamp()
     a_supprimer = []
     for mid, ev in sessions():
         try:
             fin = ev["start_ts"] + ev.get("nb_sessions", 1) * ev.get("duree", DUREE_SESSION) * 60
-            if maintenant > fin + 24 * 3600:
+            if maintenant > fin + NETTOYAGE_HEURES * 3600:
                 a_supprimer.append(mid)
         except Exception as e:
             print(f"⚠️ Session {mid} illisible, supprimée : {e}")
@@ -1464,7 +1465,7 @@ async def nettoyage_j1():
         print(f"⚠️ Nettoyage des MP : {e}")
     if a_supprimer or vieilles:
         if a_supprimer:
-            print(f"🧹 {len(a_supprimer)} session(s) supprimée(s) (J+1)")
+            print(f"🧹 {len(a_supprimer)} session(s) supprimée(s) ({NETTOYAGE_HEURES}h après la partie)")
         save_team_events()
 
 # ═══════════════════════════════════════════════════════════════════════════
