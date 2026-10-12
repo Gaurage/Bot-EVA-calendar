@@ -911,10 +911,6 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
                                                     ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
         joueurs = [p["id"] for p in ev.get("presents", []) if not p.get("invite_par")]
-        if not joueurs:
-            await interaction.response.send_message("Personne n'est inscrit à cette partie : rien n'a été envoyé.",
-                                                    ephemeral=True, delete_after=DELAI_EPHEMERE)
-            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         titre = self.titre.value.strip()
         embed = discord.Embed(
@@ -931,6 +927,13 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
                 envoyes += 1
         if str(interaction.user.id) not in joueurs:
             await envoyer_mp(interaction.user.id, embed, contenu=lien)   # copie pour le modo qui l'envoie
+        if not joueurs:
+            texte = ("🎬 Aucun inscrit sur cette partie, seule une copie t'a été envoyée en MP pour tester.\n"
+                     "Le replay est parti… dans le vide intersidéral. Sauf chez toi 🚀\n"
+                     "Tu doutais vraiment que le maître **Gaurage** ait pu faire bugger cette ligne de code ? 😎")
+            info = await interaction.followup.send(texte, ephemeral=True, wait=True)
+            await info.delete(delay=60)
+            return
         info = await interaction.followup.send(
             f"✅ Replay envoyé en MP à {envoyes}/{len(joueurs)} joueur{'s' if len(joueurs) > 1 else ''} inscrit{'s' if len(joueurs) > 1 else ''}."
             + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés.")
