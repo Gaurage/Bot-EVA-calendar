@@ -923,9 +923,12 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
         for uid in joueurs:
             if await envoyer_mp(uid, embed):   # sans session : le MP reste après le nettoyage de la partie
                 envoyes += 1
+        if str(interaction.user.id) not in joueurs:
+            await envoyer_mp(interaction.user.id, embed)   # copie pour le modo qui l'envoie
         info = await interaction.followup.send(
             f"✅ Replay envoyé en MP à {envoyes}/{len(joueurs)} joueur{'s' if len(joueurs) > 1 else ''} inscrit{'s' if len(joueurs) > 1 else ''}."
-            + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés."),
+            + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés.")
+            + " Tu en as reçu une copie en MP.",
             ephemeral=True, wait=True)
         await info.delete(delay=60)
 
