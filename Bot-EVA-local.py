@@ -842,15 +842,29 @@ def bouton(label, style, callback):
     b.callback = callback
     return b
 
+def est_modo(interaction):
+    """Modo (« Gérer les messages ») ou admin (« Gérer le serveur »)."""
+    p = interaction.permissions
+    return p.manage_guild or p.manage_messages
+
 class GererView(discord.ui.LayoutView):
-    def __init__(self, mid):
+    def __init__(self, mid, modo=False):
         super().__init__(timeout=600)
         self.mid = mid
         self.add_item(discord.ui.TextDisplay("⚙️ Que veux-tu faire ?"))
-        self.add_item(discord.ui.ActionRow(
-            bouton("✏️ Modifier", discord.ButtonStyle.primary, self.modifier),
-            bouton("🗑️ Annuler la session", discord.ButtonStyle.danger, self.annuler)))
+        boutons = [bouton("✏️ Modifier", discord.ButtonStyle.primary, self.modifier),
+                   bouton("🗑️ Annuler la session", discord.ButtonStyle.danger, self.annuler)]
+        if modo:   # bouton visible seulement par les modos et admins
+            boutons.append(bouton("🎬 Envoyer le replay", discord.ButtonStyle.success, self.replay))
+        self.add_item(discord.ui.ActionRow(*boutons))
         self.add_item(discord.ui.TextDisplay(CREDIT))
+
+    async def replay(self, interaction: discord.Interaction):
+        if not est_modo(interaction):
+            await interaction.response.send_message("⛔ Réservé aux modos et admins.", ephemeral=True,
+                                                    delete_after=DELAI_EPHEMERE)
+        elif await self._session(interaction):
+            await interaction.response.send_modal(ReplayModal(self.mid))
 
     async def _session(self, interaction):
         ev = team_events.get(self.mid)
@@ -868,6 +882,44 @@ class GererView(discord.ui.LayoutView):
     async def annuler(self, interaction: discord.Interaction):
         if await self._session(interaction):
             await interaction.response.edit_message(view=ConfirmerAnnulation(self.mid))
+
+# ── Replay (modos et admins) : lien envoyé en MP aux inscrits (pas à la file d'attente) ──
+class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
+    titre = discord.ui.TextInput(label="Titre (facultatif)", required=False, max_length=100,
+                                 placeholder="ex : Replay de la soirée Mix Chill")
+    lien = discord.ui.TextInput(label="Lien du replay", max_length=500, placeholder="https://…")
+
+    def __init__(self, mid):
+        super().__init__(timeout=900)
+        self.mid = mid
+
+    async def on_submit(self, interaction: discord.Interaction):
+        ev = team_events.get(self.mid)
+        lien = self.lien.value.strip()
+        if not ev:
+            await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
+            return
+        if not re.match(r"https?://\S+$", lien):
+            await interaction.response.send_message("❌ Le lien doit commencer par https:// (rien n'a été envoyé).",
+                                                    ephemeral=True, delete_after=DELAI_EPHEMERE)
+            return
+        joueurs = [p["id"] for p in ev.get("presents", []) if not p.get("invite_par")]
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        titre = self.titre.value.strip()
+        embed = discord.Embed(
+            title=f"🎬 REPLAY · · {libelle_ev(ev)}"[:256],
+            description=((f"**{discord.utils.escape_markdown(titre)}**\n\n" if titre else "")
+                         + f"**[▶️ Voir le replay]({lien})**"),
+            color=0x9B59B6)
+        envoyes = 0
+        for uid in joueurs:
+            if await envoyer_mp(uid, embed):   # sans session : le MP reste après le nettoyage de la partie
+                envoyes += 1
+        info = await interaction.followup.send(
+            f"✅ Replay envoyé en MP à {envoyes}/{len(joueurs)} joueur{'s' if len(joueurs) > 1 else ''} inscrit{'s' if len(joueurs) > 1 else ''}."
+            + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés."),
+            ephemeral=True, wait=True)
+        await info.delete(delay=60)
 
 # ── Annuler une session (organisateur, modo ou admin) ─────────────────────────────
 async def prevenir_annulation(mid, ev, auteur=None):
@@ -1041,7 +1093,7 @@ async def ouvrir_gerer(interaction, mid, ev):
     elif not peut_gerer(interaction, ev):
         await interaction.response.send_message("⛔ Seuls l'organisateur, les modos et les admins peuvent gérer cette session.", ephemeral=True, delete_after=DELAI_EPHEMERE)
     else:
-        await interaction.response.send_message(view=GererView(mid), ephemeral=True)
+        await interaction.response.send_message(view=GererView(mid, est_modo(interaction)), ephemeral=True)
         effacer_plus_tard(interaction, 600)   # menu expiré : on l'efface
 
 # ═══════════════════════════════════════════════════════════════════════════
