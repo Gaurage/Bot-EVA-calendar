@@ -314,13 +314,13 @@ class VueMP(discord.ui.View):
             ephemeral=True)
         effacer_plus_tard(interaction)
 
-async def envoyer_mp(user_id, embed, ev=None):
+async def envoyer_mp(user_id, embed, ev=None, contenu=None):
     """Envoie un MP ; si une session est donnée, le retient pour l'effacer avec la session."""
     if not str(user_id).isdecimal():   # invité sans compte Discord : pas de MP
         return None
     try:
         user = bot.get_user(int(user_id)) or await bot.fetch_user(int(user_id))
-        msg = await user.send(embed=embed, view=VueMP())
+        msg = await user.send(content=contenu, embed=embed, view=VueMP())
     except discord.HTTPException as e:
         print(f"⚠️ MP impossible à {user_id} (MP fermés ?) : {e}")
         return None
@@ -911,6 +911,10 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
                                                     ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
         joueurs = [p["id"] for p in ev.get("presents", []) if not p.get("invite_par")]
+        if not joueurs:
+            await interaction.response.send_message("Personne n'est inscrit à cette partie : rien n'a été envoyé.",
+                                                    ephemeral=True, delete_after=DELAI_EPHEMERE)
+            return
         await interaction.response.defer(ephemeral=True, thinking=True)
         titre = self.titre.value.strip()
         embed = discord.Embed(
@@ -922,10 +926,11 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
             color=0x9B59B6)
         envoyes = 0
         for uid in joueurs:
-            if await envoyer_mp(uid, embed):   # sans session : le MP reste après le nettoyage de la partie
+            # Lien en texte : Discord affiche l'aperçu (vidéo YouTube…), impossible depuis un embed
+            if await envoyer_mp(uid, embed, contenu=lien):   # sans session : le MP reste après le nettoyage
                 envoyes += 1
         if str(interaction.user.id) not in joueurs:
-            await envoyer_mp(interaction.user.id, embed)   # copie pour le modo qui l'envoie
+            await envoyer_mp(interaction.user.id, embed, contenu=lien)   # copie pour le modo qui l'envoie
         info = await interaction.followup.send(
             f"✅ Replay envoyé en MP à {envoyes}/{len(joueurs)} joueur{'s' if len(joueurs) > 1 else ''} inscrit{'s' if len(joueurs) > 1 else ''}."
             + ("" if envoyes == len(joueurs) else " Les autres ont leurs MP fermés.")
