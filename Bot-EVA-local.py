@@ -292,7 +292,7 @@ def est_replay(message):
 
 async def envoyer_replay(user_id, embed, lien):
     """MP replay : le cadre, puis le lien seul dans un 2e message pour que Discord affiche l'aperçu (YouTube…)."""
-    msg = await envoyer_mp(user_id, embed)   # sans session : jamais effacé par le nettoyage
+    msg = await envoyer_mp(user_id, embed, bouton_vider=False)   # sans session : jamais effacé par le nettoyage
     if msg:
         try:
             await msg.channel.send(f"🎬 {lien}")
@@ -326,13 +326,13 @@ class VueMP(discord.ui.View):
             ephemeral=True)
         effacer_plus_tard(interaction)
 
-async def envoyer_mp(user_id, embed, ev=None, contenu=None):
+async def envoyer_mp(user_id, embed, ev=None, contenu=None, bouton_vider=True):
     """Envoie un MP ; si une session est donnée, le retient pour l'effacer avec la session."""
     if not str(user_id).isdecimal():   # invité sans compte Discord : pas de MP
         return None
     try:
         user = bot.get_user(int(user_id)) or await bot.fetch_user(int(user_id))
-        msg = await user.send(content=contenu, embed=embed, view=VueMP())
+        msg = await user.send(content=contenu, embed=embed, view=VueMP() if bouton_vider else None)
     except discord.HTTPException as e:
         print(f"⚠️ MP impossible à {user_id} (MP fermés ?) : {e}")
         return None
