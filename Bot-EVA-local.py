@@ -27,6 +27,7 @@ PLACES_TEST = 1                         # option « 1 joueur (test) » réservé
 NB_SESSIONS_DEFAUT = 2                  # sessions pré-sélectionnées dans /orga
 NB_SESSIONS_MAX = 4                     # sessions enchaînées au maximum dans une annonce
 MAX_PAR_JOUR = 50                       # sessions créées par jour (anti-spam)
+MAX_PAR_JOUEUR = 10                     # sessions créées par joueur et par jour (admins non limités)
 MAX_PAR_MOIS = 1500                     # sessions créées par mois (reste dans le gratuit Google)
 PLACES_DEFAUT = 8                       # places par défaut dans /orga (modifiable à chaque fois)
 DESCRIPTIONS_DEFAUT = ["Mix Chill", "Train", "Split"]   # exemples affichés sous le champ Description
@@ -210,12 +211,8 @@ def sessions():
     return [(mid, ev) for mid, ev in team_events.items() if not mid.startswith("_")]
 
 def config_de(guild_id):
-    """Réglages de la salle enregistrés avec /config pour ce serveur (ou None).
-    Sans serveur connu (anciennes sessions) : la config s'il n'y en a qu'une."""
-    if guild_id:
-        return team_events.get(f"_config_{guild_id}")
-    configs = [v for k, v in team_events.items() if k.startswith("_config_")]
-    return configs[0] if len(configs) == 1 else None
+    """Réglages de la salle enregistrés avec /config pour ce serveur (ou None)."""
+    return team_events.get(f"_config_{guild_id}") if guild_id else None
 
 def compteurs():
     """Nombre de sessions créées aujourd'hui et ce mois-ci (remis à zéro tout seul)."""
@@ -223,9 +220,10 @@ def compteurs():
     jour, mois = now.strftime("%Y-%m-%d"), now.strftime("%Y-%m")
     st = team_events.setdefault(CLE_STATS, {})
     if st.get("jour") != jour:
-        st["jour"], st["nb_jour"] = jour, 0
+        st["jour"], st["nb_jour"], st["par_joueur"] = jour, 0, {}
     if st.get("mois") != mois:
         st["mois"], st["nb_mois"] = mois, 0
+    st.setdefault("par_joueur", {})
     return st
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -289,10 +287,6 @@ TITRE_REPLAY = "🎬 REPLAY"   # MP replay : jamais effacé (ni nettoyage, ni «
 def est_replay(message):
     return (message.content.startswith("🎬 http")
             or any((e.title or "").startswith(TITRE_REPLAY) for e in message.embeds))
-
-async def envoyer_replay(user_id, embed, lien):
-    """MP replay : un seul cadre, lien en clair dedans (pas d'aperçu)."""
-    return await envoyer_mp(user_id, embed, bouton_vider=False)   # sans session : jamais effacé par le nettoyage
 
 class VueMP(discord.ui.View):
     """Bouton sous chaque MP du bot : efface tous les messages du bot dans la conversation."""
@@ -476,10 +470,7 @@ def build_team_embed(ev):
     ts = ev["start_ts"]
     n = ev.get("nb_sessions", 1)
     d = ev.get("duree", DUREE_SESSION)
-    orga_nom = ev.get("organisateur_nom") or next(
-        (p["pseudo"] for p in ev.get("presents", []) + ev.get("attente", []) if p["id"] == ev.get("organisateur_id")), None)
-    orga = (discord.utils.escape_markdown(orga_nom) if orga_nom
-            else f"<@{ev['organisateur_id']}>" if ev.get("organisateur_id") else ev.get("organisateur", "?"))
+    orga = discord.utils.escape_markdown(ev.get("organisateur_nom") or "?")
     # Titre : jour, date et heure ; la description juste en dessous, en gros
     debut = datetime.fromtimestamp(ts, PARIS)
     titre = f"📅 {JOURS_LONGS[debut.weekday()]} {debut:%d/%m} · · 🕙 {debut:%Hh%M}"   # titre de l'annonce uniquement
@@ -806,13 +797,12 @@ async def appliquer_modif(interaction, mid, date, heure, nb, desc, places):
     try:
         await interaction.response.edit_message(view=vue_texte("✅ Session modifiée : les joueurs sont prévenus en MP."))
     except discord.HTTPException:
-        # Menu ⚙️ déjà effacé (formulaire rempli en plus d'1 min) : confirmation dans un nouveau message privé
+        # Menu ⚙️ déjà effacé (formulaire rempli en plus de 5 min) : confirmation dans un nouveau message privé
         await interaction.response.send_message("✅ Session modifiée : les joueurs sont prévenus en MP.", ephemeral=True)
     effacer_plus_tard(interaction)
     await maj_annonce(ev, mid, interaction.channel)
     lien = lien_vers_annonce(ev, mid, interaction)
     auteur = interaction.user.display_name
-    nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
     resume = "\n\n".join(f"**{lab}**\n~~{av}~~ → **{ap}**" for lab, av, ap in changements)
 
     # Fil de discussion : nouveau nom + message
@@ -916,8 +906,8 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
         if not ev:
             await interaction.response.send_message("Cette session n'existe plus.", ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
-        if not re.match(r"https?://\S+$", lien):
-            await interaction.response.send_message("❌ Le lien doit commencer par https:// (rien n'a été envoyé).",
+        if not re.match(r"https://\S+$", lien):
+            await interaction.response.send_message("❌ Lien refusé : il doit commencer par **https://** (pas http://). Rien n'a été envoyé, recopie le lien depuis YouTube.",
                                                     ephemeral=True, delete_after=DELAI_EPHEMERE)
             return
         joueurs = [p["id"] for p in ev.get("presents", []) if not p.get("invite_par")]
@@ -936,10 +926,10 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
             color=0x9B59B6)
         envoyes = 0
         for uid in joueurs:
-            if await envoyer_replay(uid, embed, lien):
+            if await envoyer_mp(uid, embed, bouton_vider=False):   # sans session : jamais effacé
                 envoyes += 1
         if str(interaction.user.id) not in joueurs:
-            await envoyer_replay(interaction.user.id, embed, lien)   # copie pour le modo qui l'envoie
+            await envoyer_mp(interaction.user.id, embed, bouton_vider=False)   # copie pour le modo qui l'envoie
         if not joueurs:
             texte = ("🎬 Aucun inscrit sur cette partie, seule une copie t'a été envoyée en MP pour tester.\n"
                      "Le replay est parti… dans le vide intersidéral. Sauf chez toi 🚀\n"
@@ -959,7 +949,6 @@ class ReplayModal(discord.ui.Modal, title="Envoyer le replay"):
 async def prevenir_annulation(mid, ev, auteur=None):
     """Session déjà retirée de team_events : MP aux joueurs, suppression du fil et de l'annonce.
     auteur=None : l'annonce a été supprimée à la main sur Discord."""
-    nom = (config_de(ev.get("guild_id")) or {}).get("nom", "EVA")
     sujet = libelle_ev(ev)
     embed = discord.Embed(
         title=(f"❌ ANNULÉE par {auteur.display_name} · · {sujet}" if auteur else f"❌ ANNULÉE · · {sujet}")[:256],
@@ -986,7 +975,7 @@ async def on_raw_message_delete(payload):
     Quand c'est le bot qui supprime (annulation, nettoyage après la partie), la session est déjà retirée : rien à faire."""
     mid = str(payload.message_id)
     ev = team_events.get(mid)
-    if not isinstance(ev, dict) or "start_ts" not in ev:
+    if not ev:
         return
     team_events.pop(mid, None)
     save_team_events()
@@ -1141,6 +1130,11 @@ async def verifier_orga(interaction):
             "⚙️ Le bot n'est pas encore configuré sur ce serveur : un admin doit lancer `/config`.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return None
     stats = compteurs()
+    if (not interaction.permissions.manage_guild
+            and stats["par_joueur"].get(str(interaction.user.id), 0) >= MAX_PAR_JOUEUR):
+        await interaction.response.send_message(
+            f"🚫 Tu as déjà créé {MAX_PAR_JOUEUR} sessions aujourd'hui. Réessaie demain !", ephemeral=True, delete_after=DELAI_EPHEMERE)
+        return None
     if stats["nb_jour"] >= MAX_PAR_JOUR:
         await interaction.response.send_message(
             f"🚫 Limite atteinte : {MAX_PAR_JOUR} sessions ont déjà été créées aujourd'hui. Réessaie demain !", ephemeral=True, delete_after=DELAI_EPHEMERE)
@@ -1161,9 +1155,6 @@ async def session_cmd(interaction: discord.Interaction):
 async def creer_session(interaction, date, heure, nb, description, places):
     stats = await verifier_orga(interaction)
     if stats is None:
-        return
-    if interaction.guild_id is None:   # ancienne commande encore visible en MP avant la synchro
-        await interaction.response.send_message("❌ `/orga` s'utilise dans un salon du serveur.", ephemeral=True, delete_after=DELAI_EPHEMERE)
         return
     debut, n, pl, erreurs = lire_saisie(date, heure, nb, places, interaction.permissions.manage_guild)
     if erreurs:
@@ -1188,6 +1179,8 @@ async def creer_session(interaction, date, heure, nb, description, places):
     # Compté AVANT le premier « await » : 2 /orga envoyés en même temps ne peuvent pas dépasser la limite
     stats["nb_jour"] += 1
     stats["nb_mois"] += 1
+    uid = str(interaction.user.id)
+    stats["par_joueur"][uid] = stats["par_joueur"].get(uid, 0) + 1
     # /orga tapé dans un fil : l'annonce part dans le salon principal (sinon pas de fil ni de notification)
     salon = interaction.channel
     cible = salon.parent if isinstance(salon, discord.Thread) and isinstance(salon.parent, discord.TextChannel) else None
@@ -1201,6 +1194,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
     except Exception:
         stats["nb_jour"] -= 1
         stats["nb_mois"] -= 1
+        stats["par_joueur"][uid] -= 1
         if cible:
             await interaction.followup.send(f"❌ Impossible de publier l'annonce dans {cible.mention} "
                                             "(le bot n'a peut-être pas le droit d'y écrire).", ephemeral=True)
@@ -1240,7 +1234,7 @@ async def supprimer_fil_perso(fil, user_id):
 def session_du_fil(thread_id):
     """Session dont le fil de discussion est thread_id -> (mid, ev) ou (None, None)."""
     for mid, ev in sessions():
-        if isinstance(ev, dict) and ev.get("thread_id") == thread_id:
+        if ev.get("thread_id") == thread_id:
             return mid, ev
     return None, None
 
@@ -1278,7 +1272,7 @@ async def notifier_role(ev, auteur):
         return
     role_id = (config_de(ev.get("guild_id")) or {}).get("role_id")
     debut = f"📣 <@&{role_id}> nouvelle session" if role_id else "🎮 Nouvelle session"
-    suite = f" organisée par {auteur.mention} : **{ev['description']}**, <t:{ev['start_ts']}:F>\n👇 Inscris-toi ici"
+    suite = f" organisée par {auteur.mention} : **{discord.utils.escape_markdown(ev['description'])}**, <t:{ev['start_ts']}:F>\n👇 Inscris-toi ici"
     try:
         fil = bot.get_channel(ev["thread_id"]) or await bot.fetch_channel(ev["thread_id"])
         msg = await fil.send(debut + suite,
@@ -1409,16 +1403,9 @@ async def enregistrer_config(interaction, nom_salle, telephone, lien, descriptio
 # ═══════════════════════════════════════════════════════════════════════════
 #  Tâches automatiques : rappel 1h avant + nettoyage 3h après la partie
 # ═══════════════════════════════════════════════════════════════════════════
-async def lien_de_annonce(mid, ev):
-    guild_id = ev.get("guild_id")
-    if not guild_id and ev.get("channel_id"):
-        try:
-            salon = bot.get_channel(ev["channel_id"]) or await bot.fetch_channel(ev["channel_id"])
-            guild_id = salon.guild.id
-        except Exception:
-            return None
-    if guild_id and ev.get("channel_id"):
-        return f"https://discord.com/channels/{guild_id}/{ev['channel_id']}/{mid}"
+def lien_de_annonce(mid, ev):
+    if ev.get("guild_id") and ev.get("channel_id"):
+        return f"https://discord.com/channels/{ev['guild_id']}/{ev['channel_id']}/{mid}"
     return None
 
 @tasks.loop(minutes=1)
@@ -1434,7 +1421,7 @@ async def rappels_1h():
             save_team_events()
             if ev.get("cree_ts", 0) > debut - 3600:
                 continue  # session créée moins d'1h avant : pas de rappel
-            lien = await lien_de_annonce(mid, ev)
+            lien = lien_de_annonce(mid, ev)
             for p in ev.get("presents", []):
                 await envoyer_rappel(p["id"], ev, lien)
             print(f"⏰ Rappel envoyé pour la session {mid} ({len(ev.get('presents', []))} joueur(s))")
@@ -1447,8 +1434,7 @@ async def supprimer_salon_ou_message(channel_id, message_id=None):
         if message_id is None:
             await salon.delete()
         else:
-            msg = await salon.fetch_message(message_id)
-            await msg.delete()
+            await salon.get_partial_message(message_id).delete()   # pas besoin de « Lire l'historique »
     except discord.NotFound:
         pass
     except discord.HTTPException as e:
