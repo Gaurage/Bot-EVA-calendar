@@ -1482,7 +1482,8 @@ async def maj_etat_fil(ev):
 
 async def relancer_fil(fil, ev):
     """Fil silencieux depuis RELANCE_HEURES : le bot poste un « état de la partie » (silencieux, avec les
-    boutons) et supprime le précédent. Le fil remonte ainsi dans la colonne de gauche jusqu'à la partie.
+    boutons) et efface les anciens panneaux (celui d'ouverture compris) : un seul panneau, toujours en bas.
+    Le fil remonte ainsi dans la colonne de gauche jusqu'à la partie.
     Si quelqu'un a écrit récemment, le fil est déjà actif : on ne poste rien."""
     dernier = discord.utils.snowflake_time(fil.last_message_id) if fil.last_message_id else fil.created_at
     if dernier and datetime.now(timezone.utc) - dernier < timedelta(hours=RELANCE_HEURES):
@@ -1491,7 +1492,20 @@ async def relancer_fil(fil, ev):
     ancien = ev.get("relance_msg_id")
     ev["relance_msg_id"] = msg.id
     save_team_events()
-    if ancien:
+    effaces = set()
+    # Anciens panneaux du bot dans le fil = ses messages avec des boutons (hors le nouveau et l'annonce de départ)
+    try:
+        async for m in fil.history(limit=100):
+            if (m.author.id == bot.user.id and m.components and m.id not in (msg.id, fil.id)
+                    and m.type == discord.MessageType.default):
+                try:
+                    await m.delete()
+                    effaces.add(m.id)
+                except discord.HTTPException:
+                    pass
+    except discord.HTTPException as e:
+        print(f"⚠️ Anciens panneaux du fil {fil.id} non lus : {e}")
+    if ancien and ancien not in effaces:
         try:
             await fil.get_partial_message(ancien).delete()
         except discord.HTTPException:
