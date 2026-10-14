@@ -1595,9 +1595,35 @@ def aide_mp():
 DEJA_AIDE = {}         # dernier jour où chaque personne a reçu le message d'aide
 PAQUETS = {}           # phrases restantes à envoyer, par personne
 
+# Frein anti-script : de quoi voir toutes les phrases d'affilée, mais pas des centaines de MP
+FREIN_PERSO = len(REPONSES_MP)   # réponses par minute et par personne
+FREIN_TOTAL = 100                # réponses par minute, tout le monde confondu
+FREIN = {}                       # personne -> [début de la minute, nombre de MP]
+_FREIN_TOTAL = [0.0, 0]
+PAUSE_MP = "⏸️ Doucement, je reprends mon souffle… Réessaie dans une minute 😅"
+
+def compter_mp(uid):
+    """Compte le MP reçu -> "ok" (réponse normale), "pause" (dernier message avant silence) ou None (silence)."""
+    maintenant = time.monotonic()
+    if maintenant - _FREIN_TOTAL[0] >= 60:
+        _FREIN_TOTAL[:] = [maintenant, 0]
+    _FREIN_TOTAL[1] += 1
+    if _FREIN_TOTAL[1] > FREIN_TOTAL:
+        return None
+    if len(FREIN) > 1000:   # on oublie les minutes terminées
+        for k in [k for k, v in FREIN.items() if maintenant - v[0] >= 60]:
+            del FREIN[k]
+    w = FREIN.get(uid)
+    if not w or maintenant - w[0] >= 60:
+        w = FREIN[uid] = [maintenant, 0]
+    w[1] += 1
+    if w[1] <= FREIN_PERSO:
+        return "ok"
+    return "pause" if w[1] == FREIN_PERSO + 1 else None
+
 def prochaine_phrase(uid):
-    """Les 19 premières phrases dans un ordre aléatoire, puis la dernière (🏆) en 20e.
-    Une fois les 20 envoyées, on remélange et on recommence."""
+    """Toutes les phrases dans un ordre aléatoire, sauf la dernière (🏆) qui arrive toujours en dernier.
+    Une fois toutes envoyées, on remélange et on recommence."""
     if not PAQUETS.get(uid):
         paquet = REPONSES_MP[:-1]
         random.shuffle(paquet)
@@ -1609,11 +1635,17 @@ async def on_message(message):
     if message.author.bot or message.guild is not None:
         return  # on ne répond qu'aux MP envoyés par des humains
     uid = message.author.id
-    texte = prochaine_phrase(uid)
-    aujourd_hui = datetime.now(PARIS).date()
-    if DEJA_AIDE.get(uid) != aujourd_hui:
-        DEJA_AIDE[uid] = aujourd_hui  # l'aide revient au 1er MP de chaque journée
-        texte += f"\n\n{aide_mp()}"
+    etat = compter_mp(uid)
+    if etat is None:
+        return   # trop de MP d'un coup (script ?) : le bot se tait jusqu'à la minute suivante
+    if etat == "pause":
+        texte = PAUSE_MP
+    else:
+        texte = prochaine_phrase(uid)
+        aujourd_hui = datetime.now(PARIS).date()
+        if DEJA_AIDE.get(uid) != aujourd_hui:
+            DEJA_AIDE[uid] = aujourd_hui  # l'aide revient au 1er MP de chaque journée
+            texte += f"\n\n{aide_mp()}"
     try:
         envoye = await message.channel.send(texte, view=VueMP())
         blagues = team_events.setdefault(CLE_BLAGUES, [])
