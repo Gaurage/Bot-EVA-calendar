@@ -156,8 +156,33 @@ def avertir_si_depot_public():
 _save_queue = queue.Queue()
 _STOP = object()   # demande d'arrêt : dernière sauvegarde puis fin du thread
 
+class _RemiseHistorique:
+    """Demande de remise à zéro de l'historique GitHub, pour la période donnée (ex : "2027-01")."""
+    def __init__(self, periode):
+        self.periode = periode
+
+_remise = {"en_cours": None, "faite": None}   # périodes demandée / réussie (lu par la boucle de nettoyage)
+
+def github_remise_historique():
+    """Remplace tout l'historique du dépôt de données par un seul point de départ contenant
+    les fichiers actuels. Rien n'est perdu : seules les anciennes versions disparaissent."""
+    base = f"https://api.github.com/repos/{GITHUB_REPO}/git"
+    r = requests.get(f"{base}/ref/heads/{GITHUB_BRANCH}", headers=_gh_headers(), timeout=15)
+    r.raise_for_status()
+    actuel = r.json()["object"]["sha"]
+    r = requests.get(f"{base}/commits/{actuel}", headers=_gh_headers(), timeout=15)
+    r.raise_for_status()
+    arbre = r.json()["tree"]["sha"]   # le contenu actuel, tel quel
+    r = requests.post(f"{base}/commits", headers=_gh_headers(), timeout=15, json={
+        "message": f"Remise à zéro de l'historique ({datetime.now(PARIS):%d/%m/%Y})",
+        "tree": arbre, "parents": []})
+    r.raise_for_status()
+    r = requests.patch(f"{base}/refs/heads/{GITHUB_BRANCH}", headers=_gh_headers(), timeout=15,
+                       json={"sha": r.json()["sha"], "force": True})
+    r.raise_for_status()
+
 def _save_worker():
-    en_attente, delai, arret = None, 5, False
+    en_attente, delai, arret, remise = None, 5, False, None
     while True:
         try:
             # Rien à envoyer : on attend. Sauvegarde ratée : on patiente « delai » avant de réessayer.
@@ -165,6 +190,8 @@ def _save_worker():
             while True:   # on saute les versions déjà dépassées
                 if item is _STOP:
                     arret = True
+                elif isinstance(item, _RemiseHistorique):
+                    remise = item
                 else:
                     en_attente = item
                 item = _save_queue.get_nowait()
@@ -175,6 +202,14 @@ def _save_worker():
                 en_attente, delai = None, 5
             else:
                 delai = min(delai * 2, 300)
+        if remise is not None and en_attente is None:   # données à jour sur GitHub : on peut repartir à zéro
+            try:
+                github_remise_historique()
+                _remise["faite"] = remise.periode
+                print("🗜️ Historique des données remis à zéro")
+            except Exception as e:
+                print(f"⚠️ Remise à zéro de l'historique ratée (nouvel essai dans 30 min) : {e}")
+            _remise["en_cours"], remise = None, None
         if arret:
             return
 
@@ -205,6 +240,7 @@ team_events = load_team_events()
 # Clés rangées avec les sessions, mais qui ne sont pas des sessions
 CLE_STATS = "_compteurs"
 CLE_BLAGUES = "_mp_blagues"   # réponses drôles envoyées en MP (effacées après 24h)
+CLE_HISTO = "_historique_remis"   # dernière remise à zéro de l'historique GitHub (ex : "2027-01")
 
 def sessions():
     """Toutes les sessions (sans les compteurs)."""
@@ -1175,6 +1211,7 @@ async def creer_session(interaction, date, heure, nb, description, places):
         "presents": [],
         "attente": [],
         "guild_id": interaction.guild_id,
+        "panneaux_ok": True,   # nouveau fil : un seul panneau dès le départ
     }
     # Compté AVANT le premier « await » : 2 /orga envoyés en même temps ne peuvent pas dépasser la limite
     stats["nb_jour"] += 1
@@ -1466,6 +1503,24 @@ async def maj_etat_fil(ev):
     except discord.HTTPException as e:
         print(f"⚠️ Message d'état du fil non mis à jour : {e}")
 
+async def effacer_vieux_panneaux(fil, garder=None):
+    """Efface les panneaux du bot dans le fil (ses messages avec des boutons, hors l'annonce de départ),
+    sauf `garder` (par défaut : le plus récent). Renvoie les ids effacés."""
+    effaces = set()
+    async for m in fil.history(limit=100):   # du plus récent au plus ancien
+        if not (m.author.id == bot.user.id and m.components and m.id != fil.id
+                and m.type == discord.MessageType.default):
+            continue
+        if garder is None:
+            garder = m.id
+        if m.id != garder:
+            try:
+                await m.delete()
+                effaces.add(m.id)
+            except discord.HTTPException:
+                pass
+    return effaces
+
 async def relancer_fil(fil, ev):
     """Fil silencieux depuis RELANCE_HEURES : le bot poste un « état de la partie » (silencieux, avec les
     boutons) et efface les anciens panneaux (celui d'ouverture compris) : un seul panneau, toujours en bas.
@@ -1478,18 +1533,10 @@ async def relancer_fil(fil, ev):
     ancien = ev.get("relance_msg_id")
     ev["relance_msg_id"] = msg.id
     save_team_events()
-    effaces = set()
-    # Anciens panneaux du bot dans le fil = ses messages avec des boutons (hors le nouveau et l'annonce de départ)
     try:
-        async for m in fil.history(limit=100):
-            if (m.author.id == bot.user.id and m.components and m.id not in (msg.id, fil.id)
-                    and m.type == discord.MessageType.default):
-                try:
-                    await m.delete()
-                    effaces.add(m.id)
-                except discord.HTTPException:
-                    pass
+        effaces = await effacer_vieux_panneaux(fil, msg.id)
     except discord.HTTPException as e:
+        effaces = set()
         print(f"⚠️ Anciens panneaux du fil {fil.id} non lus : {e}")
     if ancien and ancien not in effaces:
         try:
@@ -1532,12 +1579,27 @@ async def nettoyage_j1():
             if getattr(fil, "archived", False):
                 await fil.edit(archived=False, auto_archive_duration=10080)
                 print(f"🔔 Fil {ev['thread_id']} réveillé (session {mid})")
+            if not ev.get("panneaux_ok"):   # une seule fois par fil : un seul panneau, le plus récent
+                await effacer_vieux_panneaux(fil)
+                ev["panneaux_ok"] = True
+                save_team_events()
             if maintenant < ev["start_ts"]:
                 await relancer_fil(fil, ev)
         except discord.NotFound:
             pass
         except Exception as e:
             print(f"⚠️ Réveil du fil de la session {mid} : {e}")
+    # Historique des données sur GitHub : remis à zéro le 1er janvier et le 1er juillet, à partir de 4h
+    if USE_GITHUB:
+        now = datetime.now(PARIS)
+        periode = f"{now.year}-{now.month:02d}"
+        if _remise["faite"] == periode and team_events.get(CLE_HISTO) != periode:
+            team_events[CLE_HISTO] = periode
+            save_team_events()
+        elif (now.month in (1, 7) and (now.day > 1 or now.hour >= 4)
+                and team_events.get(CLE_HISTO) != periode and not _remise["en_cours"]):
+            _remise["en_cours"] = periode
+            _save_queue.put(_RemiseHistorique(periode))
     # Réponses drôles en MP : effacées 24h après leur envoi
     vieilles = []
     try:
